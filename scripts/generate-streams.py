@@ -6,11 +6,16 @@ static "simple-streams" layout that `incus remote add ... --protocol=simplestrea
 understands, so the image can be served over plain HTTP(S) by any static
 web server (e.g. the bundled nginx Docker image).
 
-Layout produced under --output-dir:
+Layout produced under --output-dir (web root):
     streams/v1/index.json
     streams/v1/images.json
-    streams/v1/images/<os>/<arch>/<variant>/<build-id>/lxd.tar.xz
-    streams/v1/images/<os>/<arch>/<variant>/<build-id>/rootfs.squashfs
+    images/<os>/<arch>/<variant>/<build-id>/lxd.tar.xz
+    images/<os>/<arch>/<variant>/<build-id>/rootfs.squashfs
+
+Note: image files live under <out>/images/ (web root), which MUST match the
+`path` field written into images.json (`images/...`). The simplestreams client
+(and our install.sh) resolve that `path` relative to the base URL, so the files
+must be reachable as <base-url>/images/<os>/..., not under streams/v1/.
 
 Usage:
     ./scripts/generate-streams.py \
@@ -91,7 +96,11 @@ def main() -> int:
 
     out_root = os.path.abspath(args.output_dir)
     streams_dir = os.path.join(out_root, "streams", "v1")
-    images_dir = os.path.join(streams_dir, "images", os_name, arch, variant, version_key)
+    # Image files live at the web root (out_root/images/...), NOT under
+    # streams/v1/, so the path in images.json (images/<os>/...) resolves
+    # correctly to <base-url>/images/<os>/....
+    images_dir = os.path.join(out_root, "images", os_name, arch, variant, version_key)
+    os.makedirs(streams_dir, exist_ok=True)
     os.makedirs(images_dir, exist_ok=True)
 
     # Copy image files (rename incus.tar.xz -> lxd.tar.xz, the universally

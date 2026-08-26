@@ -11,3 +11,7 @@ output/
 # Generated simple-streams tree (produced by scripts/generate-streams.py)
 incus-server/www/streams/
 !incus-server/www/.gitkeep
+
+# Python cache
+__pycache__/
+*.pyc
