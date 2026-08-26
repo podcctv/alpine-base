@@ -293,9 +293,99 @@ ssh root@<实例IP>     # IP 用 incus list 查
 ./scripts/serve-incus.sh        # 生成 + docker compose up -d
 ```
 
+### 5. 拉取自定义精选镜像（在一个源里托管你的精选集）
+
+simple-streams 支持在同一个镜像源里挂多份镜像，每份对应一个 `alias`。
+你可以把多张基于 Alpine 的定制镜像（例如：干净最小版、带 Docker 的、带编译工具链的）
+都导入到母鸡 Incus 的本地镜像库，各自起不同 alias，再统一由自建源对外分发：
+
+```bash
+# 在装有 Incus 的构建机上，导入多张镜像并起不同 alias
+incus image import output/incus/incus.tar.xz output/incus/rootfs.squashfs \
+  --alias alpine/3.24/base
+incus image import ./other/incus-dev.tar.xz ./other/rootfs.squashfs \
+  --alias alpine/3.24/dev
+
+# 重新生成 simple-streams 树（扫描本地镜像库里匹配规则的全部镜像）
+./scripts/generate-streams.py \
+  --input-dir output/incus \
+  --output-dir incus-server/www
+
+# 重启镜像源服务，客户端即可看到全部 alias
+cd incus-server && docker compose up -d --build
+```
+
+客户端按需拉取自己想要的精选：
+
+```bash
+incus remote add alpine-base http://<镜像源>:8080 --protocol=simplestreams
+incus launch alpine-base:alpine/3.24/base my-base
+incus launch alpine-base:alpine/3.24/dev  my-dev
+```
+
+> 当前 `generate-streams.py` 默认只收录 `alpine/3.24` 这一份；要托管多份，给每份镜像起好
+> alias 后扩展脚本的扫描规则即可（见 `scripts/generate-streams.py --help`）。
+
 > 安全提示：镜像源默认 **HTTP 且未签名**。内网/自用没问题；要公网暴露建议
 > 套一层 HTTPS 反向代理，并给 `images.json` / `index.json` 做 GPG 签名
 > （simple-streams 原生支持，参数见 `generate-streams.py --help`）。
+
+## 主要使用场景
+
+| 场景 | 说明 |
+|------|------|
+| **内网 / 离线 Incus 分发** | 不依赖公网 `images.linuxcontainers.org`，自建源在内网一键起，所有 Incus 母鸡统一从这里拉镜像 |
+| **统一基础镜像版本** | 团队 / 平台共用同一份 `alpine-base`（含一致 sshd 策略、发布门禁），避免各节点镜像漂移 |
+| **多节点 Incus 集群统一源** | 一个镜像源服务整个集群，更新一次、全集群生效 |
+| **作为平台 / PaaS 的自定义实例镜像** | 例如在 [runman-agent](https://github.com/podcctv/runman-agent)（NarwhalCloud NAT VPS 母鸡 Agent）里，把 `alpine-base` 作为租户实例的基础镜像 |
+
+## 在 runman-agent 中作为自定义镜像
+
+[runman-agent](https://github.com/podcctv/runman-agent) 支持 **Podman / cloud-hypervisor / Incus** 三种虚拟化后端，
+实例镜像以 OCI 引用（Podman）或 Incus 镜像别名（Incus）指定。两种后端接入 `alpine-base` 的方式如下。
+
+### Podman 后端（推荐，零改动）
+
+runman-agent 的 Podman 后端用 `req.OsImage` 作为**任意 OCI 引用**直接 `podman pull`，
+默认是 `docker.io/narwhalcloud/alpine:podman`。把它替换成 `alpine-base` 的 OCI 镜像即可：
+
+```bash
+# 方式一：直接拉 GHCR（需 GHCR 包设为 Public，或母鸡已登录 ghcr.io）
+podman pull ghcr.io/podcctv/alpine-base:3.24
+
+# 方式二：从 Release 下载 tar 包再 load（完全免登录）
+curl -fSL -O https://github.com/podcctv/alpine-base/releases/download/continuous/alpine-base-3.24-podman.tar
+podman load -i alpine-base-3.24-podman.tar
+```
+
+之后在创建 runman 实例时把镜像引用填为 `ghcr.io/podcctv/alpine-base:3.24`
+（或 `localhost/alpine-base:3.24-test`）。`alpine-base` 已内置 `openssh` 与一致 sshd 策略，
+runman 注入 root 密码后即可 SSH 登录。
+
+### Incus 后端（用自建 simple-streams 源）
+
+runman-agent 的 Incus 后端默认从 `https://images.linuxcontainers.org` 拉 `alpine/3.23/cloud`
+并自动构建 `ready` 镜像、发布到**母鸡本地** Incus 镜像库。要让它改用 `alpine-base`：
+
+1. 在 runman 母鸡上把 `alpine-base` 导入本地 Incus 镜像库，并以 runman 期望的 alias 发布
+   （注意含架构后缀，runman 实际启动用的是 `.../ready` 别名）：
+
+   ```bash
+   # 取 Incus 产物（Release 下载，或自建源提供）
+   curl -fSL -O https://github.com/podcctv/alpine-base/releases/download/continuous/incus.tar.xz
+   curl -fSL -O https://github.com/podcctv/alpine-base/releases/download/continuous/rootfs.squashfs
+
+   ARCH=amd64   # 或 arm64
+   incus image import incus.tar.xz rootfs.squashfs \
+     --alias alpine/3.24/cloud/${ARCH}/ready
+   ```
+
+2. 创建实例时把 `OsImage` 指定为 `alpine/3.24/cloud`：runman 会优先使用本地已存在的
+   `.../ready` 别名，跳过从公网源重新构建，直接以 `alpine-base` 启动实例。
+
+> 若想让 runman 的 Incus 后端**直接从你的自建 simple-streams 源**拉取（而不是本地导入），
+> 需要把 `manager/incus/incus.go` 里的镜像服务器地址改为你的源地址（目前硬编码为
+> `images.linuxcontainers.org`）。
 
 ## 维护节奏
 
