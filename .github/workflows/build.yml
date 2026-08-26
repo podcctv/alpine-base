@@ -107,9 +107,16 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.repository_owner }} --password-stdin
           TAG=$(echo "${GITHUB_REF#refs/tags/}" | tr -d 'v')
-          podman tag localhost/flanker-alpine-ssh:${ALPINE_VERSION}-test \
-            ghcr.io/${{ github.repository_owner }}/flanker-alpine-ssh:${ALPINE_VERSION}-${TAG}
-          podman push ghcr.io/${{ github.repository_owner }}/flanker-alpine-ssh:${ALPINE_VERSION}-${TAG}
+          IMMUTABLE=ghcr.io/${{ github.repository_owner }}/flanker-alpine-ssh:${ALPINE_VERSION}-${TAG}
+          STABLE=ghcr.io/${{ github.repository_owner }}/flanker-alpine-ssh:${ALPINE_VERSION}
+          # Immutable, traceable version
+          podman tag localhost/flanker-alpine-ssh:${ALPINE_VERSION}-test "$IMMUTABLE"
+          podman push "$IMMUTABLE"
+          # Rolling stable tag
+          podman tag localhost/flanker-alpine-ssh:${ALPINE_VERSION}-test "$STABLE"
+          podman push "$STABLE"
+          echo "Pushed: $IMMUTABLE"
+          echo "Pushed: $STABLE"
 
       - name: Cleanup
         if: always()

@@ -136,6 +136,51 @@ ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no root
 - [GitHub Actions](https://docs.github.com/en/actions)
 - [GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
 
+## 使用生成的镜像
+
+### Podman / OCI（从 GHCR 拉取）
+
+打 `v*` tag 推送后，CI 会自动把镜像推到 GHCR。两种 tag 都可用：
+
+```bash
+# 滚动稳定版（跟随最新发布）
+podman pull ghcr.io/podcctv/flanker-alpine-ssh:3.24
+
+# 不可变版本（可追溯到具体构建）
+podman pull ghcr.io/podcctv/flanker-alpine-ssh:3.24-v1.0.0
+```
+
+> 当前仓库为 Private，GHCR 包默认也是私有。要让别人免登录拉取，需在
+> GitHub → Packages → flanker-alpine-ssh → Settings 里把可见性改为 Public，
+> 或在拉取方用有 `read:packages` 权限的 token 登录 `ghcr.io`。
+
+启动（密码通过 secret 注入，不烧进镜像）：
+
+```bash
+printf '%s' '你的强密码' > /tmp/root_password
+podman secret create alpine_root_password /tmp/root_password
+podman run -d --name alpine -p 2222:22 \
+  --secret alpine_root_password,target=root_password \
+  ghcr.io/podcctv/flanker-alpine-ssh:3.24
+```
+
+### Incus（从 CI 产物导入）
+
+Incus 是 System Container，**不进 GHCR**（GHCR 只存 OCI 镜像）。CI 会把
+`incus.tar.xz` + `rootfs.squashfs` 作为 artifact 上传：
+
+1. 到 Actions → 最新 `Build Incus Image` → 下载 `flanker-alpine-3.24-incus` 产物
+2. 导入到本机 Incus：
+
+```bash
+incus image import incus.tar.xz rootfs.squashfs --alias flanker-alpine/3.24-test
+incus launch flanker-alpine/3.24-test my-vm
+printf 'root:%s\n' '你的强密码' | incus exec my-vm -- chpasswd
+```
+
+需要对外分发 Incus 镜像时，用 Incus 官方镜像服务（`incus-publish` / 自建
+`incus image server`），不要混用 GHCR。
+
 ## License
 
 MIT
