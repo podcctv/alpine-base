@@ -77,7 +77,7 @@ jobs:
 
       - name: Build OCI image
         run: |
-          ./scripts/build-podman.sh "localhost/flanker-alpine-base:${ALPINE_VERSION}-test"
+          ./scripts/build-podman.sh "localhost/alpine-base:${ALPINE_VERSION}-test"
 
       - name: Test container starts
         run: |
@@ -86,7 +86,7 @@ jobs:
           podman run -d --name alpine-ci-test \
             -p 2222:22 \
             --secret alpine_root_password,target=root_password \
-            localhost/flanker-alpine-base:${ALPINE_VERSION}-test
+            localhost/alpine-base:${ALPINE_VERSION}-test
           sleep 5
           STATUS=$(podman inspect alpine-ci-test --format='{{.State.Status}}')
           echo "Container status: $STATUS"
@@ -109,11 +109,11 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.repository_owner }} --password-stdin
-          STABLE=ghcr.io/${{ github.repository_owner }}/flanker-alpine-base:${ALPINE_VERSION}
-          LATEST=ghcr.io/${{ github.repository_owner }}/flanker-alpine-base:latest
-          podman tag localhost/flanker-alpine-base:${ALPINE_VERSION}-test "$STABLE"
+          STABLE=ghcr.io/${{ github.repository_owner }}/alpine-base:${ALPINE_VERSION}
+          LATEST=ghcr.io/${{ github.repository_owner }}/alpine-base:latest
+          podman tag localhost/alpine-base:${ALPINE_VERSION}-test "$STABLE"
           podman push "$STABLE"
-          podman tag localhost/flanker-alpine-base:${ALPINE_VERSION}-test "$LATEST"
+          podman tag localhost/alpine-base:${ALPINE_VERSION}-test "$LATEST"
           podman push "$LATEST"
           echo "Pushed: $STABLE"
           echo "Pushed: $LATEST"
@@ -123,8 +123,8 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.repository_owner }} --password-stdin
           TAG=$(echo "${GITHUB_REF#refs/tags/}" | tr -d 'v')
-          IMMUTABLE=ghcr.io/${{ github.repository_owner }}/flanker-alpine-base:${ALPINE_VERSION}-${TAG}
-          podman tag localhost/flanker-alpine-base:${ALPINE_VERSION}-test "$IMMUTABLE"
+          IMMUTABLE=ghcr.io/${{ github.repository_owner }}/alpine-base:${ALPINE_VERSION}-${TAG}
+          podman tag localhost/alpine-base:${ALPINE_VERSION}-test "$IMMUTABLE"
           podman push "$IMMUTABLE"
           echo "Pushed: $IMMUTABLE"
 
@@ -137,7 +137,7 @@ jobs:
   # --- Incus image build ---
   # distrobuilder only needs a Linux host; Incus daemon is NOT required to
   # produce the image tarball. The resulting artifact can be imported with:
-  #   incus image import incus.tar.xz rootfs.squashfs --alias flanker-alpine/3.24-test
+  #   incus image import incus.tar.xz rootfs.squashfs --alias alpine/3.24-test
   # Full SSH verification still requires a host with Incus installed.
   build-incus:
     name: Build Incus Image
@@ -162,7 +162,7 @@ jobs:
       - name: Upload Incus image artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: flanker-alpine-3.24-incus
+          name: alpine-3.24-incus
           path: |
             output/incus/incus.tar.xz
             output/incus/rootfs.squashfs
@@ -183,7 +183,7 @@ jobs:
       - name: Download Incus artifacts
         uses: actions/download-artifact@v5
         with:
-          name: flanker-alpine-3.24-incus
+          name: alpine-3.24-incus
           path: output/incus
 
       - name: Create Release

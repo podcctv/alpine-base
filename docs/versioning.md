@@ -7,8 +7,8 @@
 | Alpine stable | `3.24` | Rolling stable alias/tag; points to current verified build |
 | Immutable Incus | `3.24-v1.0.0` | Once published, never modified; rollback baseline |
 | Git Tag | `v1.0.0` | Corresponds to immutable image version; source traceable |
-| Podman OCI (immutable) | `ghcr.io/podcctv/flanker-alpine-base:3.24-v1.0.0` | Immutable image tag |
-| Podman OCI (stable) | `ghcr.io/podcctv/flanker-alpine-base:3.24` | Rolling stable tag |
+| Podman OCI (immutable) | `ghcr.io/podcctv/alpine-base:3.24-v1.0.0` | Immutable image tag |
+| Podman OCI (stable) | `ghcr.io/podcctv/alpine-base:3.24` | Rolling stable tag |
 
 ## Release Gate
 
@@ -31,13 +31,13 @@
 
 ```
 1. Build test image          → ./scripts/build-all.sh
-2. Launch test instance      → incus launch flanker-alpine/3.24-test alpine-ssh-test
+2. Launch test instance      → incus launch alpine/3.24-test alpine-ssh-test
 3. Set root password         → printf 'root:%s\n' "$PASS" | incus exec alpine-ssh-test -- chpasswd
 4. Generate host keys        → incus exec alpine-ssh-test -- ssh-keygen -A
 5. Run SSH verification      → ./scripts/test-ssh.sh incus alpine-ssh-test "$PASS"
 6. If all P0 pass:
    a. Tag Git                → git tag -a v1.0.0 -m '...'
-   b. Update Incus alias     → incus image alias create flanker-alpine/3.24 <fingerprint>
+   b. Update Incus alias     → incus image alias create alpine/3.24 <fingerprint>
    c. Tag & push Podman      → podman tag + podman push (GHCR)
 ```
 
@@ -56,8 +56,8 @@
 
 ```
 # Point 3.24 alias back to previous fingerprint
-incus image alias delete flanker-alpine/3.24
-incus image alias create flanker-alpine/3.24 <old-fingerprint>
+incus image alias delete alpine/3.24
+incus image alias create alpine/3.24 <old-fingerprint>
 ```
 
 Existing running instances are not affected by alias changes.
@@ -66,7 +66,7 @@ Existing running instances are not affected by alias changes.
 
 ```
 # Pull the known-good immutable tag
-podman pull ghcr.io/podcctv/flanker-alpine-base:3.24-v1.0.0
+podman pull ghcr.io/podcctv/alpine-base:3.24-v1.0.0
 ```
 
 `latest` is a rolling tag updated on every successful `main` build. It is convenient for testing, but production deployments should pin an immutable tag like `3.24-v1.0.0` to avoid surprises.

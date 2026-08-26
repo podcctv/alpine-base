@@ -1,6 +1,12 @@
-# Flanker Alpine Base 3.24
+# Alpine Base 3.24
 
 一套可重复构建的 Alpine 3.24 基础镜像源码，同时产出 **Incus System Container** 和 **Podman OCI** 镜像。
+
+[![Build](https://github.com/podcctv/alpine-base/actions/workflows/build.yml/badge.svg)](https://github.com/podcctv/alpine-base/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/podcctv/alpine-base?label=release)](https://github.com/podcctv/alpine-base/releases)
+[![License](https://img.shields.io/github/license/podcctv/alpine-base)](LICENSE)
+[![Alpine](https://img.shields.io/badge/Alpine-3.24-blue)](https://www.alpinelinux.org/)
+[![GHCR](https://img.shields.io/badge/GHCR-alpine--base-blue)](https://github.com/podcctv/alpine-base/pkgs/container/alpine-base)
 
 ## 核心目标
 
@@ -14,13 +20,15 @@
 - Incus 用 distrobuilder 构建 System Container
 - Podman 用 Containerfile 构建 OCI Image
 - GitHub Actions CI 自动验证 + GHCR 推送
+- 打 tag 自动创建 GitHub Release 并分发 Incus 镜像
 
 ## 仓库结构
 
 ```
-flanker-alpine-base/
-├── VERSION                    # Alpine 主分支版本 (3.24)
+alpine-base/
+├── VERSION                    # Alpine 主版本 (3.24)
 ├── .gitignore
+├── .gitattributes             # 强制脚本 LF 行尾
 ├── common/
 │   ├── packages.txt           # 基础软件包清单
 │   ├── sshd_config            # 统一 OpenSSH 策略
@@ -46,6 +54,7 @@ flanker-alpine-base/
 ## 安全原则
 
 基础镜像**不保存**以下任何内容：
+
 - 固定 root 密码
 - SSH 私钥
 - Host Key
@@ -57,7 +66,7 @@ flanker-alpine-base/
 
 ## 快速开始
 
-### Incus
+### Incus (System Container)
 
 ```bash
 # 构建
@@ -65,10 +74,10 @@ flanker-alpine-base/
 
 # 导入 Image Store
 incus image import output/incus/incus.tar.xz output/incus/rootfs.squashfs \
-  --alias flanker-alpine/3.24-test
+  --alias alpine/3.24-test
 
 # 启动实例
-incus launch flanker-alpine/3.24-test alpine-ssh-test
+incus launch alpine/3.24-test alpine-ssh-test
 
 # 设置 root 密码
 PASS='YourStrongPassword'
@@ -85,7 +94,7 @@ incus exec alpine-ssh-test -- rc-service sshd restart
 ./scripts/release.sh v1.0.0
 ```
 
-### Podman
+### Podman (OCI)
 
 ```bash
 # 构建
@@ -96,7 +105,7 @@ printf '%s' 'YourStrongPassword' > /tmp/root_password
 podman secret create alpine_root_password /tmp/root_password
 podman run -d --name alpine-test -p 2222:22 \
   --secret alpine_root_password,target=root_password \
-  localhost/flanker-alpine-base:3.24-test
+  localhost/alpine-base:3.24-test
 
 # SSH 测试
 ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no root@127.0.0.1
@@ -106,9 +115,10 @@ ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no root
 
 | 类型 | 格式 | 说明 |
 |------|------|------|
-| Alpine stable | `3.24` | 滚动稳定 |
-| 不可变版本 | `3.24-v1.0.0` | 不可变制品 |
-| Git Tag | `v1.0.0` | 与不可变镜像对应 |
+| Alpine stable | `3.24` | 滚动稳定 tag |
+| `latest` | `latest` | 每次 `main` 构建的最新镜像，方便测试 |
+| 不可变版本 | `3.24-v1.0.0` | 不可变制品，生产推荐 |
+| Git Tag | `v1.0.0` | 与不可变镜像对应，触发 Release |
 
 详见 [docs/versioning.md](docs/versioning.md)。
 
@@ -144,17 +154,17 @@ ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no root
 
 ```bash
 # latest（最方便，始终指向最新构建）
-podman pull ghcr.io/podcctv/flanker-alpine-base:latest
+podman pull ghcr.io/podcctv/alpine-base:latest
 
 # 滚动稳定版（固定 Alpine 大版本）
-podman pull ghcr.io/podcctv/flanker-alpine-base:3.24
+podman pull ghcr.io/podcctv/alpine-base:3.24
 
 # 不可变版本（可追溯到具体构建，推荐生产使用）
-podman pull ghcr.io/podcctv/flanker-alpine-base:3.24-v1.0.0
+podman pull ghcr.io/podcctv/alpine-base:3.24-v1.0.0
 ```
 
 > 当前仓库为 Private，GHCR 包默认也是私有。要让别人免登录拉取，需在
-> GitHub → Packages → flanker-alpine-base → Settings 里把可见性改为 Public，
+> GitHub → Packages → alpine-base → Settings 里把可见性改为 Public，
 > 或在拉取方用有 `read:packages` 权限的 token 登录 `ghcr.io`。
 
 启动（密码通过 secret 注入，不烧进镜像）：
@@ -164,26 +174,35 @@ printf '%s' '你的强密码' > /tmp/root_password
 podman secret create alpine_root_password /tmp/root_password
 podman run -d --name alpine -p 2222:22 \
   --secret alpine_root_password,target=root_password \
-  ghcr.io/podcctv/flanker-alpine-base:3.24
+  ghcr.io/podcctv/alpine-base:3.24
 ```
 
-### Incus（从 CI 产物导入）
+### Incus（从 Release 产物或 CI 产物导入）
 
-Incus 是 System Container，**不进 GHCR**（GHCR 只存 OCI 镜像）。CI 会把
-`incus.tar.xz` + `rootfs.squashfs` 作为 artifact 上传：
+Incus 是 System Container，**不进 GHCR**（GHCR 只存 OCI 镜像）。两种方式获取：
 
-1. 到 Actions → 最新 `Build Incus Image` → 下载 `flanker-alpine-3.24-incus` 产物
-2. 导入到本机 Incus：
+- **Release 资产**：到 [Releases](https://github.com/podcctv/alpine-base/releases) 下载 `incus.tar.xz` + `rootfs.squashfs`
+- **CI 产物**：到 Actions → 最新 `Build Incus Image` → 下载 `alpine-3.24-incus`
+
+导入到本机 Incus：
 
 ```bash
-incus image import incus.tar.xz rootfs.squashfs --alias flanker-alpine/3.24-test
-incus launch flanker-alpine/3.24-test my-vm
+incus image import incus.tar.xz rootfs.squashfs --alias alpine/3.24-test
+incus launch alpine/3.24-test my-vm
 printf 'root:%s\n' '你的强密码' | incus exec my-vm -- chpasswd
 ```
 
 需要对外分发 Incus 镜像时，用 Incus 官方镜像服务（`incus-publish` / 自建
 `incus image server`），不要混用 GHCR。
 
+## 维护节奏
+
+| 频率 | 动作 |
+|------|------|
+| 每月 | `git pull` → `./scripts/build-all.sh` → `test-ssh.sh` → `release.sh` |
+| 出现 CVE | 立即重构建 + 完整 SSH 验收 + 发 patch 版本 |
+| 升级大版本 | 3.24 → 3.25 时**新建独立 alias/tag**，不要覆盖 3.24 |
+
 ## License
 
-MIT
+[MIT](LICENSE)

@@ -37,4 +37,4 @@ ls -lh "$OUTPUT_DIR"
 # Show import hint
 echo ""
 echo "To import into Incus Image Store:"
-echo "  incus image import $OUTPUT_DIR/incus.tar.xz $OUTPUT_DIR/rootfs.squashfs --alias flanker-alpine/${VERSION}-test"
+echo "  incus image import $OUTPUT_DIR/incus.tar.xz $OUTPUT_DIR/rootfs.squashfs --alias alpine/${VERSION}-test"
