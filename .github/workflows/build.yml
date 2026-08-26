@@ -68,6 +68,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y podman
 
+      - name: Ensure scripts are executable
+        run: chmod +x scripts/*.sh
+
       - name: Build OCI image
         run: |
           ./scripts/build-podman.sh "localhost/flanker-alpine-ssh:${ALPINE_VERSION}-test"
@@ -117,6 +120,8 @@ jobs:
       - name: Install distrobuilder
         run: |
           sudo snap install distrobuilder --classic
+      - name: Ensure scripts are executable
+        run: chmod +x scripts/*.sh
       - name: Build Incus image
         run: |
           ./scripts/build-incus.sh
