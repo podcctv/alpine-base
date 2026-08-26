@@ -1,0 +1,32 @@
+FROM docker.io/library/alpine:3.24
+
+# Install base packages (shared with Incus via common/packages.txt)
+RUN apk add --no-cache \
+      bash \
+      ca-certificates \
+      curl \
+      wget \
+      jq \
+      tzdata \
+      iproute2 \
+      iputils \
+      bind-tools \
+      busybox-extras \
+      openssh-server \
+      openssh-client-default \
+      nano \
+      util-linux \
+      procps-ng
+
+# Copy unified sshd_config
+COPY common/sshd_config /etc/ssh/sshd_config
+
+# Copy entrypoint
+COPY podman/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Expose SSH port
+EXPOSE 22
+
+# sshd runs in foreground as PID 1
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

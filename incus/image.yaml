@@ -1,0 +1,86 @@
+image:
+  distribution: alpine
+  release: 3.24
+
+source:
+  downloader: alpinelinux-http
+  url: https://dl-cdn.alpinelinux.org/alpine/v3.24/releases
+  keys:
+    - alpine-devel@lists.alpinelinux.org-5261f1cb.rsa.pub
+  keyserver: hkps://keyserver.ubuntu.com
+
+packages:
+  manager: apk
+  update: true
+  cleanup: true
+  sets:
+    - packages:
+        - bash
+        - ca-certificates
+        - curl
+        - wget
+        - jq
+        - tzdata
+        - iproute2
+        - iputils
+        - bind-tools
+        - busybox-extras
+        - openssh-server
+        - openssh-client-default
+        - nano
+        - util-linux
+        - procps-ng
+      action: install
+
+files:
+  - path: /etc/ssh/sshd_config
+    generator: dump
+    content: |-
+      Port 22
+      AddressFamily any
+      ListenAddress 0.0.0.0
+      ListenAddress ::
+      PermitRootLogin yes
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+      PermitEmptyPasswords no
+      KbdInteractiveAuthentication no
+      UsePAM no
+      UseDNS no
+      X11Forwarding no
+      ClientAliveInterval 60
+      ClientAliveCountMax 3
+      Subsystem sftp internal-sftp
+
+actions:
+  - trigger: post-unpack
+    action: |
+      #!/bin/sh
+      echo "Post-unpack: base rootfs ready"
+
+  - trigger: post-packages
+    action: |
+      #!/bin/sh
+      set -eu
+      echo "=== Enabling sshd on OpenRC ==="
+      rc-update add sshd default 2>/dev/null || true
+
+      echo "=== Creating /run/sshd ==="
+      mkdir -p /run/sshd
+
+      echo "=== Cleaning host keys (per-instance generation) ==="
+      rm -f /etc/ssh/ssh_host_*
+
+      echo "=== Cleaning machine-id ==="
+      rm -f /etc/machine-id
+
+      echo "=== Clearing caches ==="
+      rm -rf /var/cache/apk/*
+      rm -f /root/.bash_history /root/.ash_history 2>/dev/null || true
+
+      echo "Post-packages: sshd configured and image cleaned"
+
+  - trigger: post-files
+    action: |
+      #!/bin/sh
+      echo "Post-files: all files copied, image ready for build"

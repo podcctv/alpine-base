@@ -1,0 +1,9 @@
+output/
+*.tar.xz
+*.tar.zst
+*.squashfs
+*.qcow2
+.env
+*.secret
+*.key
+.DS_Store

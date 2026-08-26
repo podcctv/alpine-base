@@ -1,0 +1,15 @@
+bash
+ca-certificates
+curl
+wget
+jq
+tzdata
+iproute2
+iputils
+bind-tools
+busybox-extras
+openssh-server
+openssh-client-default
+nano
+util-linux
+procps-ng

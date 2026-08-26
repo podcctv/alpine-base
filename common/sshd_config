@@ -1,0 +1,15 @@
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+ListenAddress ::
+PermitRootLogin yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+PermitEmptyPasswords no
+KbdInteractiveAuthentication no
+UsePAM no
+UseDNS no
+X11Forwarding no
+ClientAliveInterval 60
+ClientAliveCountMax 3
+Subsystem sftp internal-sftp
