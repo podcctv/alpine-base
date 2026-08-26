@@ -51,7 +51,7 @@ fi
 # Step 2: Git tag
 echo ""
 echo "--- [2/4] Tagging Git $VERSION ---"
-git tag -a "$VERSION" -m "Flanker Alpine Base $ALPINE_VER $VERSION"
+git tag -a "$VERSION" -m "Alpine Base $ALPINE_VER $VERSION"
 git push origin "$VERSION"
 echo -e "${GREEN}Git tag $VERSION pushed${NC}"
 

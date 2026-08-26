@@ -9,7 +9,7 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "##############################################"
-echo "#  Flanker Alpine Base — Build All           #"
+echo "#  Alpine Base — Build All (Podman + Incus)    #"
 echo "##############################################"
 echo ""
 
