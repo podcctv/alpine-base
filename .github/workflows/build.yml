@@ -17,7 +17,7 @@ jobs:
     name: Validate Files
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check VERSION file
         run: |
@@ -62,7 +62,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Podman
         run: |
@@ -117,21 +117,36 @@ jobs:
           podman rm -f alpine-ci-test 2>/dev/null || true
           podman secret rm alpine_root_password 2>/dev/null || true
 
-  # --- Incus build (requires special runner; documented for future) ---
-  # Incus builds need a runner with distrobuilder + Incus installed.
-  # Enable when a suitable self-hosted runner is available.
+  # --- Incus image build ---
+  # distrobuilder only needs a Linux host; Incus daemon is NOT required to
+  # produce the image tarball. The resulting artifact can be imported with:
+  #   incus image import incus.tar.xz rootfs.squashfs --alias flanker-alpine/3.24-test
+  # Full SSH verification still requires a host with Incus installed.
   build-incus:
-    name: Build Incus Image (manual)
+    name: Build Incus Image
     needs: validate
     runs-on: ubuntu-latest
-    if: false  # Disabled until self-hosted runner available
     steps:
-      - uses: actions/checkout@v4
-      - name: Install distrobuilder
-        run: |
-          sudo snap install distrobuilder --classic
+      - uses: actions/checkout@v5
+
       - name: Ensure scripts are executable
         run: chmod +x scripts/*.sh
+
+      - name: Install distrobuilder (snap)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y snapd
+          sudo snap install distrobuilder --classic
+
       - name: Build Incus image
         run: |
-          ./scripts/build-incus.sh
+          sudo ./scripts/build-incus.sh
+
+      - name: Upload Incus image artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: flanker-alpine-3.24-incus
+          path: |
+            output/incus/incus.tar.xz
+            output/incus/rootfs.squashfs
+          if-no-files-found: error
