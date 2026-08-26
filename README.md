@@ -140,8 +140,17 @@ cd alpine-base
 
 ```bash
 git pull
-./scripts/serve-incus.sh --download   # 强制重新拉取最新 release 镜像树并重建容器
+./scripts/serve-incus.sh --download   # 强制拉取 main 的 continuous 镜像树并重建容器
 ```
+
+需要固定到稳定版本时可显式指定 tag：
+
+```bash
+./scripts/serve-incus.sh --download --release-tag v1.0.0
+```
+
+也可用环境变量 `ALPINE_BASE_RELEASE_TAG=v1.0.0`。默认使用 `continuous`；GitHub 的
+`releases/latest` 会忽略 prerelease，因此不适合用于获取随 `main` 滚动更新的镜像。
 
 - 已有本地构建产物（`output/incus` 或已生成的 `incus-server/www`）时，直接
   `./scripts/serve-incus.sh` 即可；脚本会复用已有镜像树、仅重建容器（幂等）。
