@@ -170,11 +170,28 @@ podman pull ghcr.io/podcctv/alpine-base:3.24
 podman pull ghcr.io/podcctv/alpine-base:3.24-v1.0.0
 ```
 
-> 当前仓库为 Private，GHCR 包默认也是私有。要让别人免登录拉取，需在
-> GitHub → Packages → alpine-base → Settings 里把可见性改为 Public，
-> 或在拉取方用有 `read:packages` 权限的 token 登录 `ghcr.io`。
+> 仓库已设为 Public，但 GHCR 包的可见性**独立于仓库**。要让别人免登录拉取，仍需在
+> GitHub → Packages → alpine-base → Settings 里把可见性改为 Public；
+> 否则拉取方要用有 `read:packages` 权限的 token 登录 `ghcr.io`。
 
-启动（密码通过 secret 注入，不烧进镜像）：
+不想/不能走 GHCR 时，也可以直接从 Release 下载 Podman 镜像 tar 包：
+
+```bash
+# 下载最新 main 分支的 continuous 构建（无需任何登录）
+curl -fSL -O https://github.com/podcctv/alpine-base/releases/download/continuous/alpine-base-3.24-podman.tar
+
+# 加载到本地 Podman
+podman load -i alpine-base-3.24-podman.tar
+
+# 启动（密码通过 secret 注入，不烧进镜像）
+printf '%s' '你的强密码' > /tmp/root_password
+podman secret create alpine_root_password /tmp/root_password
+podman run -d --name alpine -p 2222:22 \
+  --secret alpine_root_password,target=root_password \
+  localhost/alpine-base:3.24-test
+```
+
+或从 GHCR 拉取（需要 GHCR 包 Public 或登录）：
 
 ```bash
 printf '%s' '你的强密码' > /tmp/root_password
@@ -183,6 +200,14 @@ podman run -d --name alpine -p 2222:22 \
   --secret alpine_root_password,target=root_password \
   ghcr.io/podcctv/alpine-base:3.24
 ```
+
+> **Release 资产速查**
+>
+> | 产物 | Release tag | 用途 |
+> |---|---|---|
+> | `alpine-base-3.24-podman.tar` | `continuous` / `v*` | `podman load -i` 直接加载 |
+> | `incus.tar.xz` + `rootfs.squashfs` | `continuous` / `v*` | `incus image import` |
+> | `incus-streams.tar.gz` | `continuous` / `v*` | 自建 simple-streams 镜像源 |
 
 ### Incus（从 Release 产物或 CI 产物导入）
 

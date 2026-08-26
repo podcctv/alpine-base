@@ -128,6 +128,20 @@ jobs:
           podman push "$IMMUTABLE"
           echo "Pushed: $IMMUTABLE"
 
+      - name: Save OCI image to tarball
+        run: |
+          mkdir -p output/podman
+          podman save -o output/podman/alpine-base-${ALPINE_VERSION}-podman.tar \
+            localhost/alpine-base:${ALPINE_VERSION}-test
+          ls -lh output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
+
+      - name: Upload Podman image artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: alpine-3.24-podman
+          path: output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
+          if-no-files-found: error
+
       - name: Cleanup
         if: always()
         run: |
@@ -181,12 +195,12 @@ jobs:
           path: incus-server/www
           if-no-files-found: error
 
-  # --- GitHub Release with Incus artifacts (tag only) ---
+  # --- GitHub Release: tag releases + rolling 'continuous' release ---
   release:
     name: Create GitHub Release
     needs: [build-podman, build-incus]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name != 'pull_request'
     permissions:
       contents: write
       packages: write
@@ -205,13 +219,36 @@ jobs:
           name: alpine-3.24-incus-streams
           path: incus-server/www
 
+      - name: Download Podman image artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: alpine-3.24-podman
+          path: output/podman
+
       - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tar -czf incus-streams.tar.gz -C incus-server/www .
-          gh release create "${GITHUB_REF#refs/tags/}" \
-            output/incus/incus.tar.xz \
-            output/incus/rootfs.squashfs \
-            incus-streams.tar.gz \
-            --generate-notes
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            gh release create "$TAG" \
+              output/incus/incus.tar.xz \
+              output/incus/rootfs.squashfs \
+              incus-streams.tar.gz \
+              output/podman/alpine-base-${ALPINE_VERSION}-podman.tar \
+              --generate-notes
+          else
+            # Rolling prerelease for main branch so assets are always downloadable
+            # without relying on GHCR package visibility.
+            gh release delete continuous --yes 2>/dev/null || true
+            gh release create continuous \
+              --target main \
+              --prerelease \
+              --title "Continuous build" \
+              --notes "Rolling release from the latest main branch commit (${GITHUB_SHA})." \
+              output/incus/incus.tar.xz \
+              output/incus/rootfs.squashfs \
+              incus-streams.tar.gz \
+              output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
+          fi
