@@ -9,6 +9,7 @@
 #   1. an existing incus-server/www/streams/v1/index.json  (already prepared)
 #   2. a local build in output/incus/                       (run build-incus.sh)
 #   3. the incus-streams.tar.gz asset from the latest GitHub release
+#      (downloaded over the public URL — no login needed for a public repo)
 #
 # Usage:
 #   ./scripts/serve-incus.sh            # deploy or update (idempotent)
@@ -81,12 +82,42 @@ ensure_streams() {
       --output-dir "$WWW_DIR"
     return
   fi
-  echo "[streams] downloading incus-streams.tar.gz from latest release ..."
-  need gh
+  echo "[streams] downloading incus-streams.tar.gz from the latest release ..."
   TMP="$(mktemp -d)"
-  gh release download --repo "$OWNER_REPO" --pattern 'incus-streams.tar.gz' --dir "$TMP" \
-    || { echo "ERROR: failed to download incus-streams.tar.gz (need 'gh' auth + network)."; rm -rf "$TMP"; exit 1; }
-  tar -xzf "$TMP/incus-streams.tar.gz" -C "$WWW_DIR"
+  ASSET="incus-streams.tar.gz"
+  # Public repos serve release assets over a public URL — no login required.
+  # 1) Try the 'latest' download alias.
+  ASSET_URL="https://github.com/$OWNER_REPO/releases/latest/download/$ASSET"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fSL "$ASSET_URL" -o "$TMP/$ASSET" || true
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$TMP/$ASSET" "$ASSET_URL" || true
+  fi
+  # 2) Some environments don't resolve the 'latest' alias; resolve the tag via
+  #    the public API and retry the explicit (tagged) download URL.
+  if [ ! -s "$TMP/$ASSET" ]; then
+    echo "[streams] 'latest' alias unresolved, querying latest tag via API ..."
+    TAG=$(curl -fsSL -H "User-Agent: serve-incus.sh" \
+            "https://api.github.com/repos/$OWNER_REPO/releases/latest" \
+            | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    if [ -n "$TAG" ]; then
+      ASSET_URL="https://github.com/$OWNER_REPO/releases/download/$TAG/$ASSET"
+      if command -v curl >/dev/null 2>&1; then
+        curl -fSL "$ASSET_URL" -o "$TMP/$ASSET" || true
+      elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$TMP/$ASSET" "$ASSET_URL" || true
+      fi
+    fi
+  fi
+  # 3) Fallback to gh only if the public download did not produce a file
+  #    (e.g. private repo, or the asset name changed).
+  if [ ! -s "$TMP/$ASSET" ]; then
+    echo "[streams] public download failed, retrying with 'gh' ..."
+    need gh
+    gh release download --repo "$OWNER_REPO" --pattern "$ASSET" --dir "$TMP" \
+      || { echo "ERROR: failed to download $ASSET (need network + 'gh' auth for private repos)."; rm -rf "$TMP"; exit 1; }
+  fi
+  tar -xzf "$TMP/$ASSET" -C "$WWW_DIR"
   rm -rf "$TMP"
   echo "[streams] extracted to $WWW_DIR"
 }
