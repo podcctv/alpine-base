@@ -38,6 +38,7 @@ jobs:
       - name: Check packages.txt
         run: |
           grep -q 'openssh-server' common/packages.txt
+          grep -q 'shadow' common/packages.txt
           echo "packages.txt validated"
 
       - name: Shell syntax check
@@ -83,11 +84,20 @@ jobs:
             -p 2222:22 \
             --secret alpine_root_password,target=root_password \
             localhost/flanker-alpine-ssh:${ALPINE_VERSION}-test
-          sleep 3
+          sleep 5
+          STATUS=$(podman inspect alpine-ci-test --format='{{.State.Status}}')
+          echo "Container status: $STATUS"
           podman logs alpine-ci-test
+          if [ "$STATUS" != "running" ]; then
+            echo "ERROR: container did not stay running (status=$STATUS)"
+            podman inspect alpine-ci-test --format='{{.State.ExitCode}}: {{.State.Error}}'
+            exit 1
+          fi
 
       - name: Verify sshd listening
         run: |
+          podman ps -a
+          podman inspect alpine-ci-test --format='Status={{.State.Status}} ExitCode={{.State.ExitCode}}'
           podman exec alpine-ci-test sh -c 'ss -lntp | grep :22 || netstat -tlnp | grep :22'
           podman exec alpine-ci-test sshd -T | grep '^permitrootlogin yes'
           podman exec alpine-ci-test sshd -T | grep '^passwordauthentication yes'

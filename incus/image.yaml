@@ -27,6 +27,7 @@ packages:
         - busybox-extras
         - openssh-server
         - openssh-client-default
+        - shadow
         - nano
         - util-linux
         - procps-ng
