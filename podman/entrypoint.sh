@@ -18,12 +18,12 @@ echo "=== entrypoint: generating host keys ==="
 ssh-keygen -A
 
 # Set root password from secret file if mounted
+# Note: do NOT delete /run/secrets/* files — the tmpfs mount is managed by
+# the container runtime and "rm" can fail with "Resource busy".
 if [ -f /run/secrets/root_password ]; then
     echo "=== entrypoint: setting root password from secret ==="
     PASS=$(cat /run/secrets/root_password)
     printf 'root:%s\n' "$PASS" | chpasswd
-    # Remove the secret file after reading
-    rm -f /run/secrets/root_password
 elif [ -n "${ROOT_PASSWORD:-}" ]; then
     echo "=== entrypoint: setting root password from env ==="
     printf 'root:%s\n' "$ROOT_PASSWORD" | chpasswd
