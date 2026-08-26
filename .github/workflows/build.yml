@@ -139,7 +139,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: alpine-3.24-podman
-          path: output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
+          path: output/podman/alpine-base-${{ env.ALPINE_VERSION }}-podman.tar
           if-no-files-found: error
 
       - name: Cleanup
