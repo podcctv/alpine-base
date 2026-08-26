@@ -4,10 +4,9 @@ image:
 
 source:
   downloader: alpinelinux-http
-  url: https://dl-cdn.alpinelinux.org/alpine/v3.24/releases
-  keys:
-    - alpine-devel@lists.alpinelinux.org-5261f1cb.rsa.pub
-  keyserver: hkps://keyserver.ubuntu.com
+  url: https://dl-cdn.alpinelinux.org/alpine
+  # The alpinelinux-http downloader appends v{release}/releases/{arch}/
+  # automatically. Do not include the release version or /releases here.
 
 packages:
   manager: apk
