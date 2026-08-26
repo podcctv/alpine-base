@@ -118,6 +118,63 @@ podman run -d --name alpine-test -p 2222:22 \
 ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no root@127.0.0.1
 ```
 
+## 一键 Docker 部署与更新
+
+对外提供 `alpine-base` 的 Incus 镜像源（simple-streams）只需一两条命令，且**支持幂等更新**：
+`scripts/serve-incus.sh` 会自动准备镜像树（优先用已生成的 `incus-server/www`，
+其次本地 `output/incus` 构建产物，最后回退到 GitHub Release 的 `incus-streams.tar.gz`），
+再用 Docker 启动 nginx 静态源。`incus-server/www` 以只读卷挂载进容器，
+因此「更新镜像」= 更新镜像树 + 重建容器，无需重建 nginx 镜像。
+
+### 首次部署（一键）
+
+```bash
+git clone https://github.com/podcctv/alpine-base.git
+cd alpine-base
+./scripts/serve-incus.sh          # 取镜像树 + docker compose up -d --build --force-recreate
+```
+
+部署完成后本地 `http://localhost:8080/streams/v1/index.json` 即为镜像源入口。
+
+### 更新（一键）
+
+```bash
+git pull
+./scripts/serve-incus.sh --download   # 强制重新拉取最新 release 镜像树并重建容器
+```
+
+- 已有本地构建产物（`output/incus` 或已生成的 `incus-server/www`）时，直接
+  `./scripts/serve-incus.sh` 即可；脚本会复用已有镜像树、仅重建容器（幂等）。
+- 重新构建了 Incus 镜像后想对外生效：`build-incus.sh` → `serve-incus.sh` 一条龙即可。
+- 仅更新镜像树（不重拉容器也可）：`docker compose -f incus-server/docker-compose.yml up -d --force-recreate`。
+
+### 停服
+
+```bash
+./scripts/serve-incus.sh --stop
+```
+
+### 不依赖仓库的一键起（仅用 Release 资产）
+
+若只是想快速起一个镜像源、不想 clone 整个仓库，可只用 Release 提供的静态树 + 内置 compose：
+
+```bash
+curl -fSL -O https://github.com/podcctv/alpine-base/releases/download/continuous/incus-streams.tar.gz
+mkdir -p incus-server/www && tar -xzf incus-streams.tar.gz -C incus-server/www
+cd incus-server && docker compose up -d --build
+```
+
+### 客户端接入
+
+部署完成后，在**任意 Incus 主机**上：
+
+```bash
+incus remote add alpine-base http://<镜像源主机>:8080 --protocol=simplestreams
+incus launch alpine-base:alpine/3.24 my-instance
+```
+
+完整原理、多镜像托管与签名见下方「Incus 镜像仓库」一节。
+
 ## 版本规则
 
 | 类型 | 格式 | 说明 |

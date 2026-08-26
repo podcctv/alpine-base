@@ -69,6 +69,9 @@ fi
 
 # --- Ensure the simple-streams tree exists ---
 ensure_streams() {
+  # `www` is gitignored, so it may not exist on a fresh clone — create it first
+  # so the download/extract and local-generate steps can write into it.
+  mkdir -p "$WWW_DIR"
   if [ "$FORCE_DOWNLOAD" = 0 ] && [ -f "$WWW_DIR/streams/v1/index.json" ]; then
     echo "[streams] using existing tree at $WWW_DIR"
     return
