@@ -7,3 +7,7 @@ output/
 *.secret
 *.key
 .DS_Store
+
+# Generated simple-streams tree (produced by scripts/generate-streams.py)
+incus-server/www/streams/
+!incus-server/www/.gitkeep

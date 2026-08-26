@@ -1,0 +1,5 @@
+# Files that should NOT be baked into the Docker build context
+www/
+*.tar.gz
+*.tar.xz
+.git

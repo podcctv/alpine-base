@@ -159,6 +159,12 @@ jobs:
         run: |
           sudo ./scripts/build-incus.sh
 
+      - name: Generate simple-streams tree
+        run: |
+          python3 scripts/generate-streams.py \
+            --input-dir output/incus \
+            --output-dir incus-server/www
+
       - name: Upload Incus image artifacts
         uses: actions/upload-artifact@v5
         with:
@@ -166,6 +172,13 @@ jobs:
           path: |
             output/incus/incus.tar.xz
             output/incus/rootfs.squashfs
+          if-no-files-found: error
+
+      - name: Upload Incus simple-streams artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: alpine-3.24-incus-streams
+          path: incus-server/www
           if-no-files-found: error
 
   # --- GitHub Release with Incus artifacts (tag only) ---
@@ -186,11 +199,19 @@ jobs:
           name: alpine-3.24-incus
           path: output/incus
 
+      - name: Download Incus simple-streams artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: alpine-3.24-incus-streams
+          path: incus-server/www
+
       - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          tar -czf incus-streams.tar.gz -C incus-server/www .
           gh release create "${GITHUB_REF#refs/tags/}" \
             output/incus/incus.tar.xz \
             output/incus/rootfs.squashfs \
+            incus-streams.tar.gz \
             --generate-notes

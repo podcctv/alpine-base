@@ -42,8 +42,15 @@ alpine-base/
 │   ├── build-incus.sh         # 构建 Incus 镜像
 │   ├── build-podman.sh        # 构建 OCI 镜像
 │   ├── build-all.sh           # 一键构建两种镜像
+│   ├── generate-streams.py    # Incus 镜像 → simple-streams 树
+│   ├── serve-incus.sh         # 一键生成 + Docker 启动镜像源
 │   ├── test-ssh.sh            # SSH 密码登录发布门禁
 │   └── release.sh             # 发布 stable
+├── incus-server/              # 自建 Incus 镜像仓库 (Docker)
+│   ├── Dockerfile
+│   ├── nginx.conf
+│   ├── docker-compose.yml
+│   └── www/                   # 生成的 simple-streams 树 (gitignore)
 ├── docs/
 │   └── versioning.md          # 版本和回滚规范
 ├── .github/workflows/
@@ -192,8 +199,78 @@ incus launch alpine/3.24-test my-vm
 printf 'root:%s\n' '你的强密码' | incus exec my-vm -- chpasswd
 ```
 
-需要对外分发 Incus 镜像时，用 Incus 官方镜像服务（`incus-publish` / 自建
-`incus image server`），不要混用 GHCR。
+需要对外分发 Incus 镜像时，用下面介绍的**自建镜像仓库**，不要混用 GHCR。
+
+## Incus 镜像仓库（自建镜像源，Docker 部署）
+
+Incus 使用 **simple-streams** 协议拉取镜像，本仓库内置了一个静态镜像源，
+用 Docker 一键跑起来后，任何 Incus 主机都能像用官方源一样 `incus launch`。
+
+镜像源本质是一个静态文件树（`streams/v1/index.json` + 镜像文件），由
+`scripts/generate-streams.py` 从构建产物生成，再用 nginx 通过 HTTP 提供。
+
+### 1. 生成 simple-streams 树
+
+```bash
+# 需要已构建的 output/incus/incus.tar.xz + rootfs.squashfs
+./scripts/generate-streams.py \
+  --input-dir output/incus \
+  --output-dir incus-server/www
+```
+
+CI 在每次 `Build Incus Image` 时也会自动生成，并作为
+`alpine-3.24-incus-streams` 产物 / Release 的 `incus-streams.tar.gz` 提供。
+下载解压到 `incus-server/www` 即可：
+
+```bash
+tar -xzf incus-streams.tar.gz -C incus-server/www
+```
+
+### 2. Docker 一键启动
+
+```bash
+cd incus-server
+docker compose up -d --build
+```
+
+服务监听 `:8080`，根路径提供 `/streams/v1/index.json`。
+（`scripts/serve-incus.sh` 把「生成 + 启动」合成一步。）
+
+> 没装 Docker 也行：直接 `python3 -m http.server 8080 --directory incus-server/www`
+> 或任意静态服务器，只要 `http://<host>:8080/streams/v1/index.json` 可达。
+
+### 3. 客户端添加镜像源并启动
+
+在**任意 Incus 主机**上：
+
+```bash
+# 添加为 simplestreams 镜像源
+incus remote add alpine-base http://<镜像源主机>:8080 --protocol=simplestreams
+
+# 直接启动（alias: alpine/3.24）
+incus launch alpine-base:alpine/3.24 my-instance
+
+# 设置 root 密码 + 生成独立 Host Key
+printf 'root:%s\n' '你的强密码' | incus exec my-instance -- chpasswd
+incus exec my-instance -- ssh-keygen -A
+incus exec my-instance -- rc-service sshd restart
+
+# SSH 登录
+ssh root@<实例IP>     # IP 用 incus list 查
+```
+
+### 4. 更新镜像
+
+重新构建 → 重新生成树 → 重启服务即可，客户端下次 `incus launch` 自动拿到新版本：
+
+```bash
+./scripts/build-incus.sh
+./scripts/serve-incus.sh        # 生成 + docker compose up -d
+```
+
+> 安全提示：镜像源默认 **HTTP 且未签名**。内网/自用没问题；要公网暴露建议
+> 套一层 HTTPS 反向代理，并给 `images.json` / `index.json` 做 GPG 签名
+> （simple-streams 原生支持，参数见 `generate-streams.py --help`）。
 
 ## 维护节奏
 

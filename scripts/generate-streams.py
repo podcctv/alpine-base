@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Generate an Incus/LXD simple-streams image server tree.
+
+Turns the distrobuilder output (incus.tar.xz + rootfs.squashfs) into the
+static "simple-streams" layout that `incus remote add ... --protocol=simplestreams`
+understands, so the image can be served over plain HTTP(S) by any static
+web server (e.g. the bundled nginx Docker image).
+
+Layout produced under --output-dir:
+    streams/v1/index.json
+    streams/v1/images.json
+    streams/v1/images/<os>/<arch>/<variant>/<build-id>/lxd.tar.xz
+    streams/v1/images/<os>/<arch>/<variant>/<build-id>/rootfs.squashfs
+
+Usage:
+    ./scripts/generate-streams.py \
+        --input-dir output/incus \
+        --output-dir incus-server/www \
+        --version 3.24
+
+Then point a static server at <output-dir> so that
+<base-url>/streams/v1/index.json is reachable, and run on the client:
+
+    incus remote add myrepo <base-url> --protocol=simplestreams
+    incus launch myrepo:alpine/3.24 my-instance
+"""
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import sys
+from datetime import datetime, timezone
+
+DEFAULT_OS = "alpine"
+DEFAULT_ARCH = "amd64"
+DEFAULT_VARIANT = "default"
+
+
+def sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--input-dir", default="output/incus",
+                    help="Directory containing incus.tar.xz + rootfs.squashfs")
+    ap.add_argument("--output-dir", default="incus-server/www",
+                    help="Web root; simple-streams tree is written under <out>/streams/v1")
+    ap.add_argument("--version", default=None,
+                    help="Alpine release, e.g. 3.24 (defaults to VERSION file)")
+    ap.add_argument("--arch", default=DEFAULT_ARCH)
+    ap.add_argument("--variant", default=DEFAULT_VARIANT)
+    ap.add_argument("--build-id", default=None,
+                    help="Unique build id (default: YYYYMMDD)")
+    args = ap.parse_args()
+
+    # Resolve Alpine version
+    version = args.version
+    if not version:
+        ver_file = os.path.join(os.path.dirname(__file__), "..", "VERSION")
+        try:
+            with open(ver_file) as fh:
+                version = fh.read().strip()
+        except FileNotFoundError:
+            version = "3.24"
+    version = version.lstrip("v")
+
+    in_dir = os.path.abspath(args.input_dir)
+    meta_tar = os.path.join(in_dir, "incus.tar.xz")
+    rootfs = os.path.join(in_dir, "rootfs.squashfs")
+    for p in (meta_tar, rootfs):
+        if not os.path.isfile(p):
+            sys.exit(f"ERROR: missing {p} — run ./scripts/build-incus.sh first")
+
+    build_id = args.build_id or datetime.now(timezone.utc).strftime("%Y%m%d")
+    os_name = DEFAULT_OS
+    arch = args.arch
+    variant = args.variant
+    product = f"{os_name}/{arch}/{variant}"
+    version_key = f"{build_id}_{os_name}_{arch}"
+
+    out_root = os.path.abspath(args.output_dir)
+    streams_dir = os.path.join(out_root, "streams", "v1")
+    images_dir = os.path.join(streams_dir, "images", os_name, arch, variant, version_key)
+    os.makedirs(images_dir, exist_ok=True)
+
+    # Copy image files (rename incus.tar.xz -> lxd.tar.xz, the universally
+    # accepted metadata filename for LXD/Incus simple-streams).
+    meta_dst = os.path.join(images_dir, "lxd.tar.xz")
+    rootfs_dst = os.path.join(images_dir, "rootfs.squashfs")
+    shutil.copyfile(meta_tar, meta_dst)
+    shutil.copyfile(rootfs, rootfs_dst)
+
+    meta_hash = sha256_of(meta_dst)
+    rootfs_hash = sha256_of(rootfs_dst)
+    meta_size = os.path.getsize(meta_dst)
+    rootfs_size = os.path.getsize(rootfs_dst)
+
+    updated = now_iso()
+
+    index = {
+        "datatype": "image-downloads",
+        "format": "index:1.0",
+        "updated": updated,
+        "products": [product],
+        "index": "streams/v1/images.json",
+    }
+
+    images = {
+        "datatype": "image-downloads",
+        "format": "products:1.0",
+        "updated": updated,
+        "products": {
+            product: {
+                "architectures": [arch],
+                "os": os_name.capitalize(),
+                "release": version,
+                "release_title": version,
+                "aliases": [
+                    f"{os_name}/{version}",
+                    f"{os_name}/{version}/{variant}",
+                    f"{os_name}",
+                ],
+                "variant": variant,
+                "versions": {
+                    version_key: {
+                        "items": {
+                            "lxd.tar.xz": {
+                                "path": f"images/{os_name}/{arch}/{variant}/{version_key}/lxd.tar.xz",
+                                "hash": f"sha256:{meta_hash}",
+                                "size": meta_size,
+                                "ftype": "lxd.tar.xz",
+                            },
+                            "rootfs.squashfs": {
+                                "path": f"images/{os_name}/{arch}/{variant}/{version_key}/rootfs.squashfs",
+                                "hash": f"sha256:{rootfs_hash}",
+                                "size": rootfs_size,
+                                "ftype": "squashfs",
+                            },
+                        },
+                        "pubname": f"{os_name}-{version}-{arch}-{variant}-{build_id}_0000",
+                        "label": variant,
+                    }
+                },
+            }
+        },
+    }
+
+    with open(os.path.join(streams_dir, "index.json"), "w") as fh:
+        json.dump(index, fh, indent=2)
+    with open(os.path.join(streams_dir, "images.json"), "w") as fh:
+        json.dump(images, fh, indent=2)
+
+    print(f"=== simple-streams tree generated ===")
+    print(f"  Product : {product}")
+    print(f"  Alias   : {os_name}/{version}")
+    print(f"  Version : {version_key}")
+    print(f"  Output  : {streams_dir}")
+    print(f"  Serve   : <base-url>/streams/v1/index.json must be reachable")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

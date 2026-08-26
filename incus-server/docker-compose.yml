@@ -1,0 +1,23 @@
+# Self-hosted Incus image repository (simple-streams server).
+#
+# 1. Generate the image tree (after building the Incus image):
+#      ./scripts/generate-streams.py --input-dir output/incus --output-dir incus-server/www
+#    or simply:  ./scripts/serve-incus.sh
+#
+# 2. Start the server:
+#      cd incus-server && docker compose up -d
+#
+# 3. On any Incus host, add the remote and launch:
+#      incus remote add alpine-base http://<this-host>:8080 --protocol=simplestreams
+#      incus launch alpine-base:alpine/3.24 my-instance
+services:
+  incus-streams:
+    build: .
+    image: alpine-base-incus-server:latest
+    container_name: alpine-base-incus-server
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount the generated simple-streams tree as the web root (read-only).
+      - ./www:/usr/share/nginx/html:ro
+    restart: unless-stopped
