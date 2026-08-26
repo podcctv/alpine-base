@@ -1,15 +1,19 @@
 #!/bin/bash
-# scripts/serve-incus.sh — Generate the simple-streams tree and launch the
-# self-hosted Incus image server with Docker.
+# scripts/serve-incus.sh — One-click deploy of the self-hosted Incus image server.
 #
-# Prerequisites:
-#   - A built Incus image in output/incus/ (incus.tar.xz + rootfs.squashfs)
-#     produced by ./scripts/build-incus.sh
-#   - Docker + docker compose available
+# Incus pulls images over the simple-streams protocol. This script stands up a
+# static simple-streams server (nginx in Docker) so any Incus host on the network
+# can `incus launch alpine-base:alpine/3.24` straight from your machine.
 #
-# What it does:
-#   1. ./scripts/generate-streams.py  -> incus-server/www/streams/v1/...
-#   2. docker compose up -d           -> serves on http://0.0.0.0:8080
+# It automatically obtains the image tree (in order of preference):
+#   1. an existing incus-server/www/streams/v1/index.json  (already prepared)
+#   2. a local build in output/incus/                       (run build-incus.sh)
+#   3. the incus-streams.tar.gz asset from the latest GitHub release
+#
+# Usage:
+#   ./scripts/serve-incus.sh            # deploy or update (idempotent)
+#   ./scripts/serve-incus.sh --download # force re-download from the release
+#   ./scripts/serve-incus.sh --stop     # stop the server
 #
 # After it is up, on any Incus host:
 #   incus remote add alpine-base http://<this-host>:8080 --protocol=simplestreams
@@ -20,33 +24,114 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+PORT=8080
+REMOTE_NAME=alpine-base
+OWNER_REPO="podcctv/alpine-base"
+WWW_DIR="incus-server/www"
+
+STOP=0
+FORCE_DOWNLOAD=0
+for a in "$@"; do
+  case "$a" in
+    --stop)     STOP=1 ;;
+    --download) FORCE_DOWNLOAD=1 ;;
+    -h|--help)  tail -n +2 "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Unknown option: $a (use --help)"; exit 1 ;;
+  esac
+done
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: '$1' is required but not found."; exit 1; }; }
+
+# --- Resolve docker compose (v2 plugin preferred, v1 fallback) ---
+if docker compose version >/dev/null 2>&1; then
+  DC="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  DC="docker-compose"
+else
+  DC=""
+fi
+
 echo "=========================================="
 echo " Incus image server (simple-streams)"
 echo "=========================================="
 
-if [ ! -f output/incus/incus.tar.xz ] || [ ! -f output/incus/rootfs.squashfs ]; then
-    echo "ERROR: output/incus/incus.tar.xz + rootfs.squashfs not found."
-    echo "       Run './scripts/build-incus.sh' first (or download the"
-    echo "       'alpine-3.24-incus' artifact from CI / GitHub Release)."
-    exit 1
+# --- Stop mode ---
+if [ "$STOP" = 1 ]; then
+  if [ -n "$DC" ]; then
+    echo "Stopping Incus image server..."
+    (cd "$REPO_ROOT/incus-server" && $DC down) || true
+  else
+    echo "docker compose not found; nothing to stop."
+  fi
+  exit 0
 fi
 
-echo "[1/2] Generating simple-streams tree -> incus-server/www ..."
-python3 scripts/generate-streams.py \
-    --input-dir output/incus \
-    --output-dir incus-server/www
+# --- Ensure the simple-streams tree exists ---
+ensure_streams() {
+  if [ "$FORCE_DOWNLOAD" = 0 ] && [ -f "$WWW_DIR/streams/v1/index.json" ]; then
+    echo "[streams] using existing tree at $WWW_DIR"
+    return
+  fi
+  if [ "$FORCE_DOWNLOAD" = 0 ] \
+     && [ -f output/incus/incus.tar.xz ] && [ -f output/incus/rootfs.squashfs ]; then
+    echo "[streams] generating from output/incus ..."
+    need python3
+    python3 scripts/generate-streams.py \
+      --input-dir output/incus \
+      --output-dir "$WWW_DIR"
+    return
+  fi
+  echo "[streams] downloading incus-streams.tar.gz from latest release ..."
+  need gh
+  TMP="$(mktemp -d)"
+  gh release download --repo "$OWNER_REPO" --pattern 'incus-streams.tar.gz' --dir "$TMP" \
+    || { echo "ERROR: failed to download incus-streams.tar.gz (need 'gh' auth + network)."; rm -rf "$TMP"; exit 1; }
+  tar -xzf "$TMP/incus-streams.tar.gz" -C "$WWW_DIR"
+  rm -rf "$TMP"
+  echo "[streams] extracted to $WWW_DIR"
+}
 
-echo "[2/2] Starting Docker image server on :8080 ..."
-cd incus-server
-if command -v docker >/dev/null 2>&1; then
-    docker compose up -d --build
-else
-    echo "ERROR: docker not found. Install Docker, or serve incus-server/www"
-    echo "       with any static web server (e.g. 'python3 -m http.server 8080')."
-    exit 1
+ensure_streams
+
+# --- Docker prerequisite ---
+if [ -z "$DC" ]; then
+  echo ""
+  echo "ERROR: docker compose not found. Install Docker Desktop (or docker-compose),"
+  echo "       or serve the tree manually, e.g.:"
+  echo "         python3 -m http.server $PORT --directory $WWW_DIR"
+  exit 1
 fi
+
+# --- Build + start ---
+echo ""
+echo "[docker] building + starting on :$PORT ..."
+(cd "$REPO_ROOT/incus-server" && $DC up -d --build --force-recreate)
+
+# --- Health check ---
+echo "[health] waiting for http://localhost:$PORT/streams/v1/index.json ..."
+OK=0
+for i in $(seq 1 30); do
+  if curl -fsS "http://localhost:$PORT/streams/v1/index.json" >/dev/null 2>&1; then
+    echo "[health] OK — endpoint reachable"
+    OK=1
+    break
+  fi
+  sleep 1
+done
+[ "$OK" = 1 ] || { echo "ERROR: endpoint not reachable after 30s. Check 'docker logs'."; exit 1; }
+
+# --- Detect a LAN address for the client command ---
+HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [ -z "$HOST_IP" ]; then
+  HOST_IP="$(ip route get 1 2>/dev/null | awk '{print $7; exit}')"
+fi
+[ -z "$HOST_IP" ] && HOST_IP="<host-ip>"
 
 echo ""
-echo "=== Server is up ==="
-echo "Verify:  curl -s http://localhost:8080/streams/v1/index.json | head"
-echo "Client: incus remote add alpine-base http://<host>:8080 --protocol=simplestreams"
+echo "=== Incus image server is running ==="
+echo "  Local:  http://localhost:$PORT/streams/v1/index.json"
+echo "  LAN:    http://$HOST_IP:$PORT/streams/v1/index.json"
+echo ""
+echo "On any Incus host, add this remote and launch:"
+echo "  incus remote add $REMOTE_NAME http://$HOST_IP:$PORT --protocol=simplestreams"
+echo "  incus launch $REMOTE_NAME:alpine/3.24 my-instance"
