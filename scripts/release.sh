@@ -21,10 +21,10 @@ FP_OR_TAG="${2:-}"
 ALPINE_VER="$(cat "$REPO_ROOT/VERSION" | tr -d '[:space:]')"
 INCUS_ALIAS="flanker-alpine/${ALPINE_VER}"
 INCUS_TEST_ALIAS="flanker-alpine/${ALPINE_VER}-test"
-PODMAN_TEST="localhost/flanker-alpine-ssh:${ALPINE_VER}-test"
-PODMAN_STABLE="localhost/flanker-alpine-ssh:${ALPINE_VER}"
-GHCR_STABLE="ghcr.io/podcctv/flanker-alpine-ssh:${ALPINE_VER}"
-GHCR_IMMUTABLE="ghcr.io/podcctv/flanker-alpine-ssh:${ALPINE_VER}-${VERSION}"
+PODMAN_TEST="localhost/flanker-alpine-base:${ALPINE_VER}-test"
+PODMAN_STABLE="localhost/flanker-alpine-base:${ALPINE_VER}"
+GHCR_STABLE="ghcr.io/podcctv/flanker-alpine-base:${ALPINE_VER}"
+GHCR_IMMUTABLE="ghcr.io/podcctv/flanker-alpine-base:${ALPINE_VER}-${VERSION}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

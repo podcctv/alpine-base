@@ -96,7 +96,7 @@ printf '%s' 'YourStrongPassword' > /tmp/root_password
 podman secret create alpine_root_password /tmp/root_password
 podman run -d --name alpine-test -p 2222:22 \
   --secret alpine_root_password,target=root_password \
-  localhost/flanker-alpine-ssh:3.24-test
+  localhost/flanker-alpine-base:3.24-test
 
 # SSH 测试
 ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no root@127.0.0.1
@@ -140,18 +140,21 @@ ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no root
 
 ### Podman / OCI（从 GHCR 拉取）
 
-打 `v*` tag 推送后，CI 会自动把镜像推到 GHCR。两种 tag 都可用：
+每次 `main` 分支 push 或打 `v*` tag 推送后，CI 会自动把镜像推到 GHCR：
 
 ```bash
-# 滚动稳定版（跟随最新发布）
-podman pull ghcr.io/podcctv/flanker-alpine-ssh:3.24
+# latest（最方便，始终指向最新构建）
+podman pull ghcr.io/podcctv/flanker-alpine-base:latest
 
-# 不可变版本（可追溯到具体构建）
-podman pull ghcr.io/podcctv/flanker-alpine-ssh:3.24-v1.0.0
+# 滚动稳定版（固定 Alpine 大版本）
+podman pull ghcr.io/podcctv/flanker-alpine-base:3.24
+
+# 不可变版本（可追溯到具体构建，推荐生产使用）
+podman pull ghcr.io/podcctv/flanker-alpine-base:3.24-v1.0.0
 ```
 
 > 当前仓库为 Private，GHCR 包默认也是私有。要让别人免登录拉取，需在
-> GitHub → Packages → flanker-alpine-ssh → Settings 里把可见性改为 Public，
+> GitHub → Packages → flanker-alpine-base → Settings 里把可见性改为 Public，
 > 或在拉取方用有 `read:packages` 权限的 token 登录 `ghcr.io`。
 
 启动（密码通过 secret 注入，不烧进镜像）：
@@ -161,7 +164,7 @@ printf '%s' '你的强密码' > /tmp/root_password
 podman secret create alpine_root_password /tmp/root_password
 podman run -d --name alpine -p 2222:22 \
   --secret alpine_root_password,target=root_password \
-  ghcr.io/podcctv/flanker-alpine-ssh:3.24
+  ghcr.io/podcctv/flanker-alpine-base:3.24
 ```
 
 ### Incus（从 CI 产物导入）

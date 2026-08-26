@@ -7,8 +7,8 @@
 | Alpine stable | `3.24` | Rolling stable alias/tag; points to current verified build |
 | Immutable Incus | `3.24-v1.0.0` | Once published, never modified; rollback baseline |
 | Git Tag | `v1.0.0` | Corresponds to immutable image version; source traceable |
-| Podman OCI (immutable) | `ghcr.io/podcctv/flanker-alpine-ssh:3.24-v1.0.0` | Immutable image tag |
-| Podman OCI (stable) | `ghcr.io/podcctv/flanker-alpine-ssh:3.24` | Rolling stable tag |
+| Podman OCI (immutable) | `ghcr.io/podcctv/flanker-alpine-base:3.24-v1.0.0` | Immutable image tag |
+| Podman OCI (stable) | `ghcr.io/podcctv/flanker-alpine-base:3.24` | Rolling stable tag |
 
 ## Release Gate
 
@@ -66,10 +66,10 @@ Existing running instances are not affected by alias changes.
 
 ```
 # Pull the known-good immutable tag
-podman pull ghcr.io/podcctv/flanker-alpine-ssh:3.24-v1.0.0
+podman pull ghcr.io/podcctv/flanker-alpine-base:3.24-v1.0.0
 ```
 
-Never rely on `latest`.
+`latest` is a rolling tag updated on every successful `main` build. It is convenient for testing, but production deployments should pin an immutable tag like `3.24-v1.0.0` to avoid surprises.
 
 ## Backup
 
