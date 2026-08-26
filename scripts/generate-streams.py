@@ -108,14 +108,7 @@ def main() -> int:
 
     updated = now_iso()
 
-    index = {
-        "datatype": "image-downloads",
-        "format": "index:1.0",
-        "updated": updated,
-        "products": [product],
-        "index": "streams/v1/images.json",
-    }
-
+    # images.json —— 真正的 products 清单（datatype=image-downloads, format=products:1.0）
     images = {
         "datatype": "image-downloads",
         "format": "products:1.0",
@@ -152,6 +145,24 @@ def main() -> int:
                         "label": variant,
                     }
                 },
+            }
+        },
+    }
+
+    # index.json —— simplestreams 索引文件（datatype=index:1.0, format=simplestreams:1.0）。
+    # 注意：索引文件必须指向 products 清单的路径（streams/v1/images.json），
+    # 之前误把 image-downloads 内容写进了 index.json，导致 `incus remote add
+    # --protocol=simplestreams` 客户端找不到合法索引而失败。
+    index = {
+        "datatype": "index:1.0",
+        "format": "simplestreams:1.0",
+        "updated": updated,
+        "index": {
+            "streams/v1/images.json": {
+                "datatype": "image-downloads:1.0",
+                "format": "products:1.0",
+                "products": [os_name],
+                "type": "image-downloads",
             }
         },
     }
