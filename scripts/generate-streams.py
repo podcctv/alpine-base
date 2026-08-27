@@ -80,7 +80,7 @@ def main() -> int:
     ap.add_argument("--arch", default=DEFAULT_ARCH)
     ap.add_argument("--variant", default=DEFAULT_VARIANT)
     ap.add_argument("--build-id", default=None,
-                    help="Unique build id (default: YYYYMMDD)")
+                    help="Unique build id (default: UTC YYYYMMDD_HHMMSS)")
     args = ap.parse_args()
 
     # Resolve Alpine version
@@ -101,7 +101,11 @@ def main() -> int:
         if not os.path.isfile(p):
             sys.exit(f"ERROR: missing {p} — run ./scripts/build-incus.sh first")
 
-    build_id = args.build_id or datetime.now(timezone.utc).strftime("%Y%m%d")
+    # Release assets are served with immutable cache headers, so every rebuild
+    # must use a new URL even when multiple main pushes happen on the same day.
+    # The first eight characters stay YYYYMMDD because Incus parses them as the
+    # image creation date.
+    build_id = args.build_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     os_name = DEFAULT_OS
     arch = args.arch
     variant = args.variant
