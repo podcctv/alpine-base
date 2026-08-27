@@ -303,6 +303,8 @@ Incus 使用 **simple-streams** 协议拉取镜像，本仓库内置了一个静
 和镜像文件），由 `scripts/generate-streams.py` 从构建产物生成，再用 nginx
 通过 HTTP 提供。生成结果使用 Incus 6.x 可识别的 `incus.tar.xz` 元数据项，
 并记录元数据与 rootfs 串联计算的镜像指纹；CI 和部署脚本都会在发布前完整校验。
+镜像还会在 OpenRC 启动 cloud-init 前把 Incus 6 的 `/dev/incus` 客户端接口兼容映射
+到 Alpine cloud-init 使用的 `/dev/lxd` 路径，并限制数据源探测，避免回退等待 EC2 元数据。
 
 ### 1. 生成 simple-streams 树
 

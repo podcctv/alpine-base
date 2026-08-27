@@ -54,6 +54,34 @@ files:
       ClientAliveCountMax 3
       Subsystem sftp internal-sftp
 
+  - path: /etc/cloud/cloud.cfg.d/90-incus-datasource.cfg
+    generator: dump
+    content: |-
+      # Alpine cloud-init still names the Incus/LXC guest API datasource LXD.
+      # Restrict probing so an unavailable socket never falls through to a
+      # multi-minute EC2 metadata lookup.
+      datasource_list: [ LXD, None ]
+
+  - path: /etc/init.d/incus-cloud-init-compat
+    generator: dump
+    mode: 0755
+    content: |-
+      #!/sbin/openrc-run
+
+      description="Expose the Incus 6 guest socket at cloud-init's legacy LXD path"
+
+      depend() {
+          before cloud-init-local
+      }
+
+      start() {
+          ebegin "Creating /dev/lxd compatibility link"
+          if [ -S /dev/incus/sock ] && [ ! -e /dev/lxd ]; then
+              ln -s /dev/incus /dev/lxd
+          fi
+          eend 0
+      }
+
 actions:
   - trigger: post-unpack
     action: |
@@ -68,6 +96,7 @@ actions:
       rc-update add sshd default 2>/dev/null || true
 
       echo "=== Enabling cloud-init on OpenRC ==="
+      rc-update add incus-cloud-init-compat boot 2>/dev/null || true
       rc-update add cloud-init-local boot 2>/dev/null || true
       rc-update add cloud-init boot 2>/dev/null || true
       rc-update add cloud-config default 2>/dev/null || true
