@@ -44,6 +44,7 @@ alpine-base/
 │   ├── build-podman.sh        # 构建 OCI 镜像
 │   ├── build-all.sh           # 一键构建两种镜像
 │   ├── generate-streams.py    # Incus 镜像 → simple-streams 树
+│   ├── validate-streams.py    # 校验清单、文件哈希与组合指纹
 │   ├── serve-incus.sh         # 一键生成 + Docker 启动镜像源
 │   ├── test-ssh.sh            # SSH 密码登录发布门禁
 │   └── release.sh             # 发布 stable
@@ -298,8 +299,10 @@ printf 'root:%s\n' '你的强密码' | incus exec my-vm -- chpasswd
 Incus 使用 **simple-streams** 协议拉取镜像，本仓库内置了一个静态镜像源，
 用 Docker 一键跑起来后，任何 Incus 主机都能像用官方源一样 `incus launch`。
 
-镜像源本质是一个静态文件树（`streams/v1/index.json` + 镜像文件），由
-`scripts/generate-streams.py` 从构建产物生成，再用 nginx 通过 HTTP 提供。
+镜像源本质是一个静态文件树（`streams/v1/index.json`、`streams/v1/images.json`
+和镜像文件），由 `scripts/generate-streams.py` 从构建产物生成，再用 nginx
+通过 HTTP 提供。生成结果使用 Incus 6.x 可识别的 `incus.tar.xz` 元数据项，
+并记录元数据与 rootfs 串联计算的镜像指纹；CI 和部署脚本都会在发布前完整校验。
 
 ### 1. 生成 simple-streams 树
 
@@ -308,6 +311,7 @@ Incus 使用 **simple-streams** 协议拉取镜像，本仓库内置了一个静
 ./scripts/generate-streams.py \
   --input-dir output/incus \
   --output-dir incus-server/www
+python3 scripts/validate-streams.py incus-server/www
 ```
 
 CI 在每次 `Build Incus Image` 时也会自动生成，并作为

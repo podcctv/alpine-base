@@ -9,7 +9,7 @@ web server (e.g. the bundled nginx Docker image).
 Layout produced under --output-dir (web root):
     streams/v1/index.json
     streams/v1/images.json
-    images/<os>/<arch>/<variant>/<build-id>/lxd.tar.xz
+    images/<os>/<arch>/<variant>/<build-id>/incus.tar.xz
     images/<os>/<arch>/<variant>/<build-id>/rootfs.squashfs
 
 Note: image files live under <out>/images/ (web root), which MUST match the
@@ -47,6 +47,20 @@ def sha256_of(path: str) -> str:
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
+    return h.hexdigest()
+
+
+def sha256_concat(*paths: str) -> str:
+    """Return the Incus fingerprint for a split image.
+
+    Incus fingerprints are the SHA-256 of the metadata and rootfs files
+    concatenated byte-for-byte in that order.
+    """
+    h = hashlib.sha256()
+    for path in paths:
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
     return h.hexdigest()
 
 
@@ -91,7 +105,7 @@ def main() -> int:
     os_name = DEFAULT_OS
     arch = args.arch
     variant = args.variant
-    product = f"{os_name}/{arch}/{variant}"
+    product = f"{os_name}:{version}:{arch}:{variant}"
     version_key = f"{build_id}_{os_name}_{arch}"
 
     out_root = os.path.abspath(args.output_dir)
@@ -103,9 +117,10 @@ def main() -> int:
     os.makedirs(streams_dir, exist_ok=True)
     os.makedirs(images_dir, exist_ok=True)
 
-    # Copy image files (rename incus.tar.xz -> lxd.tar.xz, the universally
-    # accepted metadata filename for LXD/Incus simple-streams).
-    meta_dst = os.path.join(images_dir, "lxd.tar.xz")
+    # Incus 6.x discovers split images by ftype=incus.tar.xz. The LXD
+    # compatibility item below points to the same metadata file, matching the
+    # public images.linuxcontainers.org stream layout.
+    meta_dst = os.path.join(images_dir, "incus.tar.xz")
     rootfs_dst = os.path.join(images_dir, "rootfs.squashfs")
     shutil.copyfile(meta_tar, meta_dst)
     shutil.copyfile(rootfs, rootfs_dst)
@@ -114,6 +129,7 @@ def main() -> int:
     rootfs_hash = sha256_of(rootfs_dst)
     meta_size = os.path.getsize(meta_dst)
     rootfs_size = os.path.getsize(rootfs_dst)
+    combined_hash = sha256_concat(meta_dst, rootfs_dst)
 
     updated = now_iso()
 
@@ -124,28 +140,36 @@ def main() -> int:
         "updated": updated,
         "products": {
             product: {
-                "architectures": [arch],
+                "arch": arch,
                 "os": os_name.capitalize(),
                 "release": version,
                 "release_title": version,
-                "aliases": [
+                "aliases": ",".join([
                     f"{os_name}/{version}",
                     f"{os_name}/{version}/{variant}",
                     f"{os_name}",
-                ],
+                ]),
                 "variant": variant,
                 "versions": {
                     version_key: {
                         "items": {
+                            "incus.tar.xz": {
+                                "path": f"images/{os_name}/{arch}/{variant}/{version_key}/incus.tar.xz",
+                                "sha256": meta_hash,
+                                "combined_squashfs_sha256": combined_hash,
+                                "size": meta_size,
+                                "ftype": "incus.tar.xz",
+                            },
                             "lxd.tar.xz": {
-                                "path": f"images/{os_name}/{arch}/{variant}/{version_key}/lxd.tar.xz",
-                                "hash": f"sha256:{meta_hash}",
+                                "path": f"images/{os_name}/{arch}/{variant}/{version_key}/incus.tar.xz",
+                                "sha256": meta_hash,
+                                "combined_squashfs_sha256": combined_hash,
                                 "size": meta_size,
                                 "ftype": "lxd.tar.xz",
                             },
-                            "rootfs.squashfs": {
+                            "root.squashfs": {
                                 "path": f"images/{os_name}/{arch}/{variant}/{version_key}/rootfs.squashfs",
-                                "hash": f"sha256:{rootfs_hash}",
+                                "sha256": rootfs_hash,
                                 "size": rootfs_size,
                                 "ftype": "squashfs",
                             },
@@ -163,15 +187,14 @@ def main() -> int:
     # 之前误把 image-downloads 内容写进了 index.json，导致 `incus remote add
     # --protocol=simplestreams` 客户端找不到合法索引而失败。
     index = {
-        "datatype": "index:1.0",
-        "format": "simplestreams:1.0",
+        "format": "index:1.0",
         "updated": updated,
         "index": {
-            "streams/v1/images.json": {
-                "datatype": "image-downloads:1.0",
+            "images": {
+                "datatype": "image-downloads",
+                "path": "streams/v1/images.json",
                 "format": "products:1.0",
-                "products": [os_name],
-                "type": "image-downloads",
+                "products": [product],
             }
         },
     }

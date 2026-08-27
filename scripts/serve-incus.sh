@@ -126,30 +126,7 @@ ensure_streams() {
   need python3
   mkdir -p "$TMP/tree"
   tar -xzf "$TMP/$ASSET" -C "$TMP/tree"
-  python3 - "$TMP/tree" <<'PY'
-import json
-import pathlib
-import sys
-
-root = pathlib.Path(sys.argv[1]).resolve()
-index_path = root / "streams/v1/index.json"
-images_path = root / "streams/v1/images.json"
-with index_path.open(encoding="utf-8") as fh:
-    index = json.load(fh)
-with images_path.open(encoding="utf-8") as fh:
-    images = json.load(fh)
-if index.get("datatype") != "index:1.0" or index.get("format") != "simplestreams:1.0":
-    raise SystemExit("ERROR: invalid simplestreams index.json")
-if "streams/v1/images.json" not in index.get("index", {}):
-    raise SystemExit("ERROR: index.json does not reference images.json")
-for product in images.get("products", {}).values():
-    for version in product.get("versions", {}).values():
-        for item in version.get("items", {}).values():
-            rel = item.get("path", "")
-            candidate = (root / rel).resolve()
-            if root not in candidate.parents or not candidate.is_file():
-                raise SystemExit(f"ERROR: missing or unsafe image path: {rel}")
-PY
+  python3 "$REPO_ROOT/scripts/validate-streams.py" "$TMP/tree"
   cp -a "$TMP/tree/." "$WWW_DIR/"
   rm -rf "$TMP"
   echo "[streams] validated and extracted to $WWW_DIR"

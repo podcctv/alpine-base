@@ -195,6 +195,7 @@ jobs:
           python3 scripts/generate-streams.py \
             --input-dir output/incus \
             --output-dir incus-server/www
+          python3 scripts/validate-streams.py incus-server/www
 
       - name: Upload Incus image artifacts
         uses: actions/upload-artifact@v7
