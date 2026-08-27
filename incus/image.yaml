@@ -96,7 +96,6 @@ actions:
       rc-update add sshd default 2>/dev/null || true
 
       echo "=== Enabling cloud-init on OpenRC ==="
-      rc-update add incus-cloud-init-compat boot 2>/dev/null || true
       rc-update add cloud-init-local boot 2>/dev/null || true
       rc-update add cloud-init boot 2>/dev/null || true
       rc-update add cloud-config default 2>/dev/null || true
@@ -120,4 +119,8 @@ actions:
   - trigger: post-files
     action: |
       #!/bin/sh
+      set -eu
+      # The custom service is created by the files generator, which runs after
+      # post-packages; enable it only once that file exists.
+      rc-update add incus-cloud-init-compat boot
       echo "Post-files: all files copied, image ready for build"
