@@ -16,6 +16,7 @@
 
 - Alpine v3.24，官方支持至 2028-06-01
 - 统一 sshd_config：`PermitRootLogin yes` + `PasswordAuthentication yes`
+- Incus 镜像内置 OpenRC + cloud-init，启动时可注入密码、静态 IPv4/IPv6 和 SSH 配置
 - 镜像不含固定密码、SSH 私钥、Host Key — 每实例独立生成
 - Incus 用 distrobuilder 构建 System Container
 - Podman 用 Containerfile 构建 OCI Image
@@ -432,6 +433,8 @@ runman 注入 root 密码后即可 SSH 登录。
 
 runman-agent 的 Incus 后端默认从 `https://images.linuxcontainers.org` 拉 `alpine/3.23/cloud`
 并自动构建 `ready` 镜像、发布到**母鸡本地** Incus 镜像库。要让它改用 `alpine-base`：
+
+> `alpine-base` 的 Incus 产物包含 OpenRC 和 cloud-init 四阶段服务，可直接处理 Incus `cloud-init.user-data`。新版 runman-agent 也会通过 Incus agent 做一次运行时兜底，以兼容旧镜像和精简镜像。
 
 1. 在 runman 母鸡上把 `alpine-base` 导入本地 Incus 镜像库，并以 runman 期望的 alias 发布
    （注意含架构后缀，runman 实际启动用的是 `.../ready` 别名）：

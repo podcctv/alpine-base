@@ -17,7 +17,7 @@ jobs:
     name: Validate Files
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Check VERSION file
         run: |
@@ -39,6 +39,8 @@ jobs:
         run: |
           grep -q 'openssh-server' common/packages.txt
           grep -q 'shadow' common/packages.txt
+          grep -q -- '- openrc' incus/image.yaml
+          grep -q -- '- cloud-init' incus/image.yaml
           echo "packages.txt validated"
 
       - name: Shell syntax check
@@ -65,7 +67,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Podman
         run: |
@@ -136,7 +138,7 @@ jobs:
           ls -lh output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
 
       - name: Upload Podman image artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: alpine-3.24-podman
           path: output/podman/alpine-base-${{ env.ALPINE_VERSION }}-podman.tar
@@ -158,7 +160,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Ensure scripts are executable
         run: chmod +x scripts/*.sh
@@ -173,6 +175,18 @@ jobs:
         run: |
           sudo ./scripts/build-incus.sh
 
+      - name: Verify Incus init and cloud-init runtime
+        run: |
+          sudo rm -rf /tmp/alpine-incus-rootfs
+          sudo unsquashfs -d /tmp/alpine-incus-rootfs output/incus/rootfs.squashfs >/dev/null
+          test -x /tmp/alpine-incus-rootfs/sbin/openrc
+          test -x /tmp/alpine-incus-rootfs/usr/bin/cloud-init
+          test -x /tmp/alpine-incus-rootfs/etc/init.d/sshd
+          test -x /tmp/alpine-incus-rootfs/etc/init.d/cloud-init-local
+          test -e /tmp/alpine-incus-rootfs/etc/runlevels/default/sshd
+          test -e /tmp/alpine-incus-rootfs/etc/runlevels/boot/cloud-init-local
+          test -e /tmp/alpine-incus-rootfs/etc/runlevels/default/cloud-final
+
       - name: Generate simple-streams tree
         run: |
           python3 scripts/generate-streams.py \
@@ -180,7 +194,7 @@ jobs:
             --output-dir incus-server/www
 
       - name: Upload Incus image artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: alpine-3.24-incus
           path: |
@@ -189,7 +203,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Incus simple-streams artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: alpine-3.24-incus-streams
           path: incus-server/www
@@ -205,22 +219,22 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Download Incus artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: alpine-3.24-incus
           path: output/incus
 
       - name: Download Incus simple-streams artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: alpine-3.24-incus-streams
           path: incus-server/www
 
       - name: Download Podman image artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: alpine-3.24-podman
           path: output/podman

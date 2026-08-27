@@ -26,6 +26,8 @@ packages:
         - busybox-extras
         - openssh-server
         - openssh-client-default
+        - openrc
+        - cloud-init
         - shadow
         - nano
         - util-linux
@@ -64,6 +66,12 @@ actions:
       set -eu
       echo "=== Enabling sshd on OpenRC ==="
       rc-update add sshd default 2>/dev/null || true
+
+      echo "=== Enabling cloud-init on OpenRC ==="
+      rc-update add cloud-init-local boot 2>/dev/null || true
+      rc-update add cloud-init boot 2>/dev/null || true
+      rc-update add cloud-config default 2>/dev/null || true
+      rc-update add cloud-final default 2>/dev/null || true
 
       echo "=== Creating /run/sshd ==="
       mkdir -p /run/sshd
