@@ -183,9 +183,12 @@ jobs:
           test -x /tmp/alpine-incus-rootfs/usr/bin/cloud-init
           test -x /tmp/alpine-incus-rootfs/etc/init.d/sshd
           test -x /tmp/alpine-incus-rootfs/etc/init.d/cloud-init-local
-          test -e /tmp/alpine-incus-rootfs/etc/runlevels/default/sshd
-          test -e /tmp/alpine-incus-rootfs/etc/runlevels/boot/cloud-init-local
-          test -e /tmp/alpine-incus-rootfs/etc/runlevels/default/cloud-final
+          # OpenRC runlevel entries are absolute symlinks into /etc/init.d;
+          # after extraction under /tmp, `test -e` follows them against the
+          # runner root. Check the symlink itself instead.
+          test -L /tmp/alpine-incus-rootfs/etc/runlevels/default/sshd
+          test -L /tmp/alpine-incus-rootfs/etc/runlevels/boot/cloud-init-local
+          test -L /tmp/alpine-incus-rootfs/etc/runlevels/default/cloud-final
 
       - name: Generate simple-streams tree
         run: |
