@@ -1,18 +1,37 @@
 #!/bin/bash
 # scripts/build-podman.sh — Build Podman OCI image
 #
-# Usage: ./scripts/build-podman.sh [tag]
-# Default tag: localhost/alpine-base:3.24-test
+# Usage: ./scripts/build-podman.sh [alpine|debian] [tag]
+# Legacy usage with one non-distro argument continues to build Alpine.
 
 set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="$(cat "$REPO_ROOT/VERSION" | tr -d '[:space:]')"
-CONTAINERFILE="$REPO_ROOT/podman/Containerfile"
-TAG="${1:-localhost/alpine-base:${VERSION}-test}"
+DISTRO="${1:-alpine}"
+case "$DISTRO" in
+    alpine)
+        VERSION="$(cat "$REPO_ROOT/VERSION" | tr -d '[:space:]')"
+        CONTAINERFILE="$REPO_ROOT/podman/Containerfile"
+        IMAGE_NAME="alpine-base"
+        shift || true
+        ;;
+    debian)
+        VERSION="$(cat "$REPO_ROOT/debian/VERSION" | tr -d '[:space:]')"
+        CONTAINERFILE="$REPO_ROOT/debian/Containerfile"
+        IMAGE_NAME="debian-base"
+        shift
+        ;;
+    *)
+        # Compatibility with ./scripts/build-podman.sh localhost/alpine-base:tag
+        VERSION="$(cat "$REPO_ROOT/VERSION" | tr -d '[:space:]')"
+        CONTAINERFILE="$REPO_ROOT/podman/Containerfile"
+        IMAGE_NAME="alpine-base"
+        ;;
+esac
+TAG="${1:-localhost/${IMAGE_NAME}:${VERSION}-test}"
 
 echo "=========================================="
-echo " Building Podman OCI image — Alpine $VERSION"
+echo " Building Podman OCI image — $DISTRO $VERSION"
 echo "=========================================="
 echo " Containerfile: $CONTAINERFILE"
 echo " Tag:           $TAG"

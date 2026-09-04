@@ -1,6 +1,6 @@
-# Alpine Base 3.24
+# Alpine Base 3.24 + Debian Base 13
 
-一套可重复构建的 Alpine 3.24 基础镜像源码，同时产出 **Incus System Container** 和 **Podman OCI** 镜像。
+一套可重复构建的 Alpine 3.24 与 Debian 13 基础镜像源码；每个发行版均同时产出 **Incus System Container** 和 **Podman OCI** 镜像。
 
 [![Build](https://github.com/podcctv/alpine-base/actions/workflows/build.yml/badge.svg)](https://github.com/podcctv/alpine-base/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/podcctv/alpine-base?label=release)](https://github.com/podcctv/alpine-base/releases)
@@ -28,6 +28,7 @@
 ```
 alpine-base/
 ├── VERSION                    # Alpine 主版本 (3.24)
+├── debian/                    # Debian 13 的 Containerfile、Incus 定义与版本
 ├── .gitignore
 ├── .gitattributes             # 强制脚本 LF 行尾
 ├── common/
@@ -78,11 +79,12 @@ alpine-base/
 ### Incus (System Container)
 
 ```bash
-# 构建
-./scripts/build-incus.sh
+# 构建 Alpine 或 Debian（不传参数时保持 Alpine 兼容）
+./scripts/build-incus.sh alpine
+./scripts/build-incus.sh debian
 
 # 导入 Image Store
-incus image import output/incus/incus.tar.xz output/incus/rootfs.squashfs \
+incus image import output/incus/alpine/incus.tar.xz output/incus/alpine/rootfs.squashfs \
   --alias alpine/3.24-test
 
 # 启动实例
@@ -107,7 +109,8 @@ incus exec alpine-ssh-test -- rc-service sshd restart
 
 ```bash
 # 构建
-./scripts/build-podman.sh
+./scripts/build-podman.sh alpine
+./scripts/build-podman.sh debian
 
 # 启动测试容器
 printf '%s' 'YourStrongPassword' > /tmp/root_password
@@ -225,7 +228,7 @@ incus launch alpine-base:alpine/3.24 my-instance
 
 ### Podman / OCI（从 GHCR 拉取）
 
-每次 `main` 分支 push 或打 `v*` tag 推送后，CI 会自动把镜像推到 GHCR：
+每次 `main` 分支 push 或打 `v*` tag 推送后，CI 会自动把 Alpine 与 Debian 镜像推到 GHCR：
 
 ```bash
 # latest（最方便，始终指向最新构建）
@@ -236,6 +239,9 @@ podman pull ghcr.io/podcctv/alpine-base:3.24
 
 # 不可变版本（可追溯到具体构建，推荐生产使用）
 podman pull ghcr.io/podcctv/alpine-base:3.24-v1.0.0
+
+# Debian 13（同样提供 latest、13 与不可变 tag）
+podman pull ghcr.io/podcctv/debian-base:13
 ```
 
 > 仓库已设为 Public，但 GHCR 包的可见性**独立于仓库**。要让别人免登录拉取，仍需在
@@ -274,7 +280,9 @@ podman run -d --name alpine -p 2222:22 \
 > | 产物 | Release tag | 用途 |
 > |---|---|---|
 > | `alpine-base-3.24-podman.tar` | `continuous` / `v*` | `podman load -i` 直接加载 |
-> | `incus.tar.xz` + `rootfs.squashfs` | `continuous` / `v*` | `incus image import` |
+> | `debian-base-13-podman.tar` | `continuous` / `v*` | Debian OCI，`podman load -i` 直接加载 |
+> | `incus.tar.xz` + `rootfs.squashfs` | `continuous` / `v*` | Alpine `incus image import`（兼容旧名称） |
+> | `debian-13-incus.tar.xz` + `debian-13-rootfs.squashfs` | `continuous` / `v*` | Debian `incus image import` |
 > | `incus-streams.tar.gz` | `continuous` / `v*` | 自建 simple-streams 镜像源 |
 
 ### Incus（从 Release 产物或 CI 产物导入）
@@ -282,7 +290,7 @@ podman run -d --name alpine -p 2222:22 \
 Incus 是 System Container，**不进 GHCR**（GHCR 只存 OCI 镜像）。两种方式获取：
 
 - **Release 资产**：到 [Releases](https://github.com/podcctv/alpine-base/releases) 下载 `incus.tar.xz` + `rootfs.squashfs`
-- **CI 产物**：到 Actions → 最新 `Build Incus Image` → 下载 `alpine-3.24-incus`
+- **CI 产物**：到 Actions → 最新 `Build & Test` → 下载 `alpine-3.24-incus` 或 `debian-13-incus`
 
 导入到本机 Incus：
 
@@ -311,9 +319,10 @@ release 在同一天更新时出现新清单与旧缓存文件的哈希错配。
 ### 1. 生成 simple-streams 树
 
 ```bash
-# 需要已构建的 output/incus/incus.tar.xz + rootfs.squashfs
-./scripts/generate-streams.py \
-  --input-dir output/incus \
+# 同时收录 Alpine 与 Debian；单一 Alpine 构建仍可只使用 --input-dir
+./scripts/generate-streams.py --clean \
+  --image alpine:3.24:output/incus/alpine \
+  --image debian:13:output/incus/debian \
   --output-dir incus-server/www
 python3 scripts/validate-streams.py incus-server/www
 ```
@@ -350,6 +359,9 @@ incus remote add alpine-base http://<镜像源主机>:8080 --protocol=simplestre
 # 直接启动（alias: alpine/3.24）
 incus launch alpine-base:alpine/3.24 my-instance
 
+# Debian alias: debian/13
+incus launch alpine-base:debian/13 my-debian-instance
+
 # 设置 root 密码 + 生成独立 Host Key
 printf 'root:%s\n' '你的强密码' | incus exec my-instance -- chpasswd
 incus exec my-instance -- ssh-keygen -A
@@ -364,7 +376,7 @@ ssh root@<实例IP>     # IP 用 incus list 查
 重新构建 → 重新生成树 → 重启服务即可，客户端下次 `incus launch` 自动拿到新版本：
 
 ```bash
-./scripts/build-incus.sh
+./scripts/build-all.sh
 ./scripts/serve-incus.sh        # 生成 + docker compose up -d
 ```
 
@@ -398,8 +410,8 @@ incus launch alpine-base:alpine/3.24/base my-base
 incus launch alpine-base:alpine/3.24/dev  my-dev
 ```
 
-> 当前 `generate-streams.py` 默认只收录 `alpine/3.24` 这一份；要托管多份，给每份镜像起好
-> alias 后扩展脚本的扫描规则即可（见 `scripts/generate-streams.py --help`）。
+> `generate-streams.py` 兼容单一 Alpine 的旧 `--input-dir` 调用，也支持重复传入
+> `--image OS:RELEASE:DIR`，因此可在同一个源中发布 Alpine、Debian 和更多定制镜像。
 
 > 安全提示：镜像源默认 **HTTP 且未签名**。内网/自用没问题；要公网暴露建议
 > 套一层 HTTPS 反向代理，并给 `images.json` / `index.json` 做 GPG 签名
@@ -422,20 +434,21 @@ incus launch alpine-base:alpine/3.24/dev  my-dev
 ### Podman 后端（推荐，零改动）
 
 runman-agent 的 Podman 后端用 `req.OsImage` 作为**任意 OCI 引用**直接 `podman pull`，
-默认是 `docker.io/narwhalcloud/alpine:podman`。把它替换成 `alpine-base` 的 OCI 镜像即可：
+默认是 `docker.io/narwhalcloud/alpine:podman`。把它替换成 `alpine-base` 或 `debian-base` 的 OCI 镜像即可：
 
 ```bash
 # 方式一：直接拉 GHCR（需 GHCR 包设为 Public，或母鸡已登录 ghcr.io）
 podman pull ghcr.io/podcctv/alpine-base:3.24
+podman pull ghcr.io/podcctv/debian-base:13
 
 # 方式二：从 Release 下载 tar 包再 load（完全免登录）
 curl -fSL -O https://github.com/podcctv/alpine-base/releases/download/continuous/alpine-base-3.24-podman.tar
 podman load -i alpine-base-3.24-podman.tar
 ```
 
-之后在创建 runman 实例时把镜像引用填为 `ghcr.io/podcctv/alpine-base:3.24`
-（或 `localhost/alpine-base:3.24-test`）。`alpine-base` 已内置 `openssh` 与一致 sshd 策略，
-runman 注入 root 密码后即可 SSH 登录。
+之后在创建 runman 实例时把镜像引用填为 `ghcr.io/podcctv/alpine-base:3.24` 或
+`ghcr.io/podcctv/debian-base:13`（也可填写对应的本地 test 标签）。两者均内置 `openssh` 与一致
+sshd 策略，runman 注入 root 密码后即可 SSH 登录。
 
 ### Incus 后端（用自建 simple-streams 源）
 

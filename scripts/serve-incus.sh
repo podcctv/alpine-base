@@ -3,11 +3,12 @@
 #
 # Incus pulls images over the simple-streams protocol. This script stands up a
 # static simple-streams server (nginx in Docker) so any Incus host on the network
-# can `incus launch alpine-base:alpine/3.24` straight from your machine.
+# can `incus launch alpine-base:alpine/3.24` or
+# `incus launch alpine-base:debian/13` straight from your machine.
 #
 # It automatically obtains the image tree (in order of preference):
 #   1. an existing incus-server/www/streams/v1/index.json  (already prepared)
-#   2. a local build in output/incus/                       (run build-incus.sh)
+#   2. local builds in output/incus/{alpine,debian}/         (run build-all.sh)
 #   3. the incus-streams.tar.gz asset from the rolling `continuous` release
 #      (downloaded over the public URL — no login needed for a public repo)
 #
@@ -92,12 +93,18 @@ ensure_streams() {
     return
   fi
   if [ "$FORCE_DOWNLOAD" = 0 ] \
-     && [ -f output/incus/incus.tar.xz ] && [ -f output/incus/rootfs.squashfs ]; then
-    echo "[streams] generating from output/incus ..."
+     && [ -f output/incus/alpine/incus.tar.xz ] && [ -f output/incus/alpine/rootfs.squashfs ]; then
+    echo "[streams] generating from local Incus outputs ..."
     need python3
-    python3 scripts/generate-streams.py \
-      --input-dir output/incus \
-      --output-dir "$WWW_DIR"
+    if [ -f output/incus/debian/incus.tar.xz ] && [ -f output/incus/debian/rootfs.squashfs ]; then
+      python3 scripts/generate-streams.py --clean --output-dir "$WWW_DIR" \
+        --image "alpine:$(tr -d '[:space:]' < VERSION):output/incus/alpine" \
+        --image "debian:$(tr -d '[:space:]' < debian/VERSION):output/incus/debian"
+    else
+      python3 scripts/generate-streams.py --clean \
+        --input-dir output/incus/alpine \
+        --output-dir "$WWW_DIR"
+    fi
     return
   fi
   echo "[streams] downloading incus-streams.tar.gz from release '$RELEASE_TAG' ..."
@@ -176,3 +183,4 @@ echo ""
 echo "On any Incus host, add this remote and launch:"
 echo "  incus remote add $REMOTE_NAME http://$HOST_IP:$PORT --protocol=simplestreams"
 echo "  incus launch $REMOTE_NAME:alpine/3.24 my-instance"
+echo "  incus launch $REMOTE_NAME:debian/13 my-debian-instance"

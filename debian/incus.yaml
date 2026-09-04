@@ -1,0 +1,73 @@
+image:
+  distribution: debian
+  release: trixie
+
+source:
+  downloader: debootstrap
+  url: https://deb.debian.org/debian
+  suite: trixie
+  variant: minbase
+
+packages:
+  manager: apt
+  update: true
+  cleanup: true
+  sets:
+    - packages:
+        - bash
+        - ca-certificates
+        - curl
+        - wget
+        - jq
+        - tzdata
+        - iproute2
+        - iputils-ping
+        - dnsutils
+        - netcat-openbsd
+        - openssh-server
+        - openssh-client
+        - passwd
+        - nano
+        - util-linux
+        - procps
+        - cloud-init
+        - systemd
+        - systemd-sysv
+        - dbus
+      action: install
+
+files:
+  - path: /etc/ssh/sshd_config
+    generator: dump
+    content: |-
+      Port 22
+      AddressFamily any
+      ListenAddress 0.0.0.0
+      ListenAddress ::
+      PermitRootLogin yes
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+      PermitEmptyPasswords no
+      KbdInteractiveAuthentication no
+      UsePAM no
+      UseDNS no
+      X11Forwarding no
+      ClientAliveInterval 60
+      ClientAliveCountMax 3
+      Subsystem sftp internal-sftp
+  - path: /etc/cloud/cloud.cfg.d/90-incus-datasource.cfg
+    generator: dump
+    content: |-
+      datasource_list: [ LXD, None ]
+
+actions:
+  - trigger: post-packages
+    action: |-
+      #!/bin/sh
+      set -eu
+      mkdir -p /run/sshd
+      rm -f /etc/ssh/ssh_host_* /etc/machine-id
+      systemctl enable ssh.service || true
+      systemctl enable cloud-init-local.service cloud-init.service cloud-config.service cloud-final.service || true
+      apt-get clean
+      rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

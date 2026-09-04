@@ -71,8 +71,10 @@ def now_iso() -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--input-dir", default="output/incus",
-                    help="Directory containing incus.tar.xz + rootfs.squashfs")
+    ap.add_argument("--input-dir", default="output/incus/alpine",
+                    help="Legacy single-image input directory")
+    ap.add_argument("--image", action="append", default=[], metavar="OS:RELEASE:DIR",
+                    help="Image to publish; repeat for multiple OS releases")
     ap.add_argument("--output-dir", default="incus-server/www",
                     help="Web root; simple-streams tree is written under <out>/streams/v1")
     ap.add_argument("--version", default=None,
@@ -81,109 +83,86 @@ def main() -> int:
     ap.add_argument("--variant", default=DEFAULT_VARIANT)
     ap.add_argument("--build-id", default=None,
                     help="Unique build id (default: UTC YYYYMMDD_HHMMSS)")
+    ap.add_argument("--clean", action="store_true",
+                    help="Remove generated streams/ and images/ before writing")
     args = ap.parse_args()
-
-    # Resolve Alpine version
-    version = args.version
-    if not version:
-        ver_file = os.path.join(os.path.dirname(__file__), "..", "VERSION")
-        try:
-            with open(ver_file) as fh:
-                version = fh.read().strip()
-        except FileNotFoundError:
-            version = "3.24"
-    version = version.lstrip("v")
-
-    in_dir = os.path.abspath(args.input_dir)
-    meta_tar = os.path.join(in_dir, "incus.tar.xz")
-    rootfs = os.path.join(in_dir, "rootfs.squashfs")
-    for p in (meta_tar, rootfs):
-        if not os.path.isfile(p):
-            sys.exit(f"ERROR: missing {p} — run ./scripts/build-incus.sh first")
 
     # Release assets are served with immutable cache headers, so every rebuild
     # must use a new URL even when multiple main pushes happen on the same day.
     # The first eight characters stay YYYYMMDD because Incus parses them as the
     # image creation date.
     build_id = args.build_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    os_name = DEFAULT_OS
-    arch = args.arch
-    variant = args.variant
-    product = f"{os_name}:{version}:{arch}:{variant}"
-    version_key = f"{build_id}_{os_name}_{arch}"
-
     out_root = os.path.abspath(args.output_dir)
     streams_dir = os.path.join(out_root, "streams", "v1")
+    if args.clean:
+        for generated in (os.path.join(out_root, "streams"), os.path.join(out_root, "images")):
+            shutil.rmtree(generated, ignore_errors=True)
     # Image files live at the web root (out_root/images/...), NOT under
     # streams/v1/, so the path in images.json (images/<os>/...) resolves
     # correctly to <base-url>/images/<os>/....
-    images_dir = os.path.join(out_root, "images", os_name, arch, variant, version_key)
     os.makedirs(streams_dir, exist_ok=True)
-    os.makedirs(images_dir, exist_ok=True)
-
-    # Incus 6.x discovers split images by ftype=incus.tar.xz. The LXD
-    # compatibility item below points to the same metadata file, matching the
-    # public images.linuxcontainers.org stream layout.
-    meta_dst = os.path.join(images_dir, "incus.tar.xz")
-    rootfs_dst = os.path.join(images_dir, "rootfs.squashfs")
-    shutil.copyfile(meta_tar, meta_dst)
-    shutil.copyfile(rootfs, rootfs_dst)
-
-    meta_hash = sha256_of(meta_dst)
-    rootfs_hash = sha256_of(rootfs_dst)
-    meta_size = os.path.getsize(meta_dst)
-    rootfs_size = os.path.getsize(rootfs_dst)
-    combined_hash = sha256_concat(meta_dst, rootfs_dst)
-
     updated = now_iso()
 
-    # images.json —— 真正的 products 清单（datatype=image-downloads, format=products:1.0）
+    specs = args.image
+    if not specs:
+        version = args.version
+        if not version:
+            ver_file = os.path.join(os.path.dirname(__file__), "..", "VERSION")
+            version = open(ver_file, encoding="utf-8").read().strip() if os.path.isfile(ver_file) else "3.24"
+        specs = [f"{DEFAULT_OS}:{version}:{args.input_dir}"]
+
+    products = {}
+    for spec in specs:
+        try:
+            os_name, version, in_dir = spec.split(":", 2)
+        except ValueError:
+            sys.exit(f"ERROR: --image must be OS:RELEASE:DIR, got {spec!r}")
+        os_name, version = os_name.strip().lower(), version.strip().lstrip("v")
+        if not os_name or not version:
+            sys.exit(f"ERROR: invalid --image {spec!r}")
+        in_dir = os.path.abspath(in_dir)
+        meta_tar, rootfs = os.path.join(in_dir, "incus.tar.xz"), os.path.join(in_dir, "rootfs.squashfs")
+        for path in (meta_tar, rootfs):
+            if not os.path.isfile(path):
+                sys.exit(f"ERROR: missing {path} — build {os_name} Incus image first")
+
+        arch, variant = args.arch, args.variant
+        product = f"{os_name}:{version}:{arch}:{variant}"
+        if product in products:
+            sys.exit(f"ERROR: duplicate simple-streams product {product}")
+        version_key = f"{build_id}_{os_name}_{arch}"
+        images_dir = os.path.join(out_root, "images", os_name, arch, variant, version_key)
+        os.makedirs(images_dir, exist_ok=True)
+        meta_dst, rootfs_dst = os.path.join(images_dir, "incus.tar.xz"), os.path.join(images_dir, "rootfs.squashfs")
+        shutil.copyfile(meta_tar, meta_dst)
+        shutil.copyfile(rootfs, rootfs_dst)
+        meta_hash, rootfs_hash = sha256_of(meta_dst), sha256_of(rootfs_dst)
+        meta_size, rootfs_size = os.path.getsize(meta_dst), os.path.getsize(rootfs_dst)
+        combined_hash = sha256_concat(meta_dst, rootfs_dst)
+        products[product] = {
+            "arch": arch, "os": os_name.capitalize(), "release": version, "release_title": version,
+            "aliases": ",".join([f"{os_name}/{version}", f"{os_name}/{version}/{variant}", os_name]),
+            "variant": variant,
+            "versions": {version_key: {"items": {
+                "incus.tar.xz": {
+                    "path": f"images/{os_name}/{arch}/{variant}/{version_key}/incus.tar.xz",
+                    "sha256": meta_hash, "combined_squashfs_sha256": combined_hash,
+                    "size": meta_size, "ftype": "incus.tar.xz"},
+                "lxd.tar.xz": {
+                    "path": f"images/{os_name}/{arch}/{variant}/{version_key}/incus.tar.xz",
+                    "sha256": meta_hash, "combined_squashfs_sha256": combined_hash,
+                    "size": meta_size, "ftype": "lxd.tar.xz"},
+                "root.squashfs": {
+                    "path": f"images/{os_name}/{arch}/{variant}/{version_key}/rootfs.squashfs",
+                    "sha256": rootfs_hash, "size": rootfs_size, "ftype": "squashfs"},
+            }, "pubname": f"{os_name}-{version}-{arch}-{variant}-{build_id}_0000", "label": variant}},
+        }
+
     images = {
         "datatype": "image-downloads",
         "format": "products:1.0",
         "updated": updated,
-        "products": {
-            product: {
-                "arch": arch,
-                "os": os_name.capitalize(),
-                "release": version,
-                "release_title": version,
-                "aliases": ",".join([
-                    f"{os_name}/{version}",
-                    f"{os_name}/{version}/{variant}",
-                    f"{os_name}",
-                ]),
-                "variant": variant,
-                "versions": {
-                    version_key: {
-                        "items": {
-                            "incus.tar.xz": {
-                                "path": f"images/{os_name}/{arch}/{variant}/{version_key}/incus.tar.xz",
-                                "sha256": meta_hash,
-                                "combined_squashfs_sha256": combined_hash,
-                                "size": meta_size,
-                                "ftype": "incus.tar.xz",
-                            },
-                            "lxd.tar.xz": {
-                                "path": f"images/{os_name}/{arch}/{variant}/{version_key}/incus.tar.xz",
-                                "sha256": meta_hash,
-                                "combined_squashfs_sha256": combined_hash,
-                                "size": meta_size,
-                                "ftype": "lxd.tar.xz",
-                            },
-                            "root.squashfs": {
-                                "path": f"images/{os_name}/{arch}/{variant}/{version_key}/rootfs.squashfs",
-                                "sha256": rootfs_hash,
-                                "size": rootfs_size,
-                                "ftype": "squashfs",
-                            },
-                        },
-                        "pubname": f"{os_name}-{version}-{arch}-{variant}-{build_id}_0000",
-                        "label": variant,
-                    }
-                },
-            }
-        },
+        "products": products,
     }
 
     # index.json —— simplestreams 索引文件（datatype=index:1.0, format=simplestreams:1.0）。
@@ -198,7 +177,7 @@ def main() -> int:
                 "datatype": "image-downloads",
                 "path": "streams/v1/images.json",
                 "format": "products:1.0",
-                "products": [product],
+                "products": sorted(products),
             }
         },
     }
@@ -209,9 +188,7 @@ def main() -> int:
         json.dump(images, fh, indent=2)
 
     print(f"=== simple-streams tree generated ===")
-    print(f"  Product : {product}")
-    print(f"  Alias   : {os_name}/{version}")
-    print(f"  Version : {version_key}")
+    print(f"  Products: {', '.join(sorted(products))}")
     print(f"  Output  : {streams_dir}")
     print(f"  Serve   : <base-url>/streams/v1/index.json must be reachable")
     return 0

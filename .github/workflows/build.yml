@@ -10,266 +10,195 @@ on:
 
 env:
   ALPINE_VERSION: "3.24"
+  DEBIAN_VERSION: "13"
 
 jobs:
-  # --- Syntax & structure checks (always run) ---
   validate:
     name: Validate Files
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Check VERSION file
+      - name: Check declared releases and SSH policy
         run: |
-          VER=$(cat VERSION | tr -d '[:space:]')
-          echo "Alpine version: $VER"
-          if [ "$VER" != "$ALPINE_VERSION" ]; then
-            echo "ERROR: VERSION mismatch"
-            exit 1
-          fi
-
-      - name: Check sshd_config
-        run: |
-          grep -q '^PermitRootLogin yes' common/sshd_config
-          grep -q '^PasswordAuthentication yes' common/sshd_config
-          grep -q '^PermitEmptyPasswords no' common/sshd_config
-          echo "sshd_config validated"
-
-      - name: Check packages.txt
-        run: |
-          grep -q 'openssh-server' common/packages.txt
-          grep -q 'shadow' common/packages.txt
-          grep -q -- '- openrc' incus/image.yaml
-          grep -q -- '- cloud-init' incus/image.yaml
-          echo "packages.txt validated"
-
-      - name: Shell syntax check
-        run: |
-          for f in common/setup-base.sh \
-                   podman/entrypoint.sh \
-                   scripts/*.sh; do
-            sh -n "$f" && echo "OK: $f"
+          test "$(tr -d '[:space:]' < VERSION)" = "$ALPINE_VERSION"
+          test "$(tr -d '[:space:]' < debian/VERSION)" = "$DEBIAN_VERSION"
+          for f in common/sshd_config debian/incus.yaml; do
+            grep -q '^ *PermitRootLogin yes' "$f"
+            grep -q '^ *PasswordAuthentication yes' "$f"
+            grep -q '^ *PermitEmptyPasswords no' "$f"
           done
-
-      - name: Check .gitignore
+          grep -q 'cloud-init' incus/image.yaml
+          grep -q 'cloud-init' debian/incus.yaml
+          grep -q 'debian:13-slim' debian/Containerfile
+      - name: Shell and Python syntax checks
+        run: |
+          for f in common/setup-base.sh podman/entrypoint.sh scripts/*.sh; do sh -n "$f"; done
+          python3 -m py_compile scripts/generate-streams.py scripts/validate-streams.py
+      - name: Validate combined Alpine and Debian simple-streams
+        run: |
+          mkdir -p /tmp/alpine /tmp/debian /tmp/streams
+          printf alpine-meta >/tmp/alpine/incus.tar.xz
+          printf alpine-rootfs >/tmp/alpine/rootfs.squashfs
+          printf debian-meta >/tmp/debian/incus.tar.xz
+          printf debian-rootfs >/tmp/debian/rootfs.squashfs
+          python3 scripts/generate-streams.py --clean --output-dir /tmp/streams --build-id 20260904_000000 \
+            --image alpine:${ALPINE_VERSION}:/tmp/alpine --image debian:${DEBIAN_VERSION}:/tmp/debian
+          python3 scripts/validate-streams.py /tmp/streams
+          python3 - <<'PY'
+          import json
+          with open('/tmp/streams/streams/v1/images.json') as f:
+              assert set(json.load(f)['products']) == {'alpine:3.24:amd64:default', 'debian:13:amd64:default'}
+          PY
+      - name: Check ignore rules
         run: |
           grep -q 'output/' .gitignore
           grep -q '\.env' .gitignore
           grep -q '\*\.key' .gitignore
-          echo ".gitignore validated"
 
-  # --- Podman OCI build (P1, second phase) ---
   build-podman:
-    name: Build Podman Image
+    name: Build Podman ${{ matrix.distro }} image
     needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - { distro: alpine, version: "3.24", image: alpine-base }
+          - { distro: debian, version: "13", image: debian-base }
     steps:
       - uses: actions/checkout@v7
-
       - name: Install Podman
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-
-      - name: Ensure scripts are executable
-        run: chmod +x scripts/*.sh
-
+        run: sudo apt-get update && sudo apt-get install -y podman
       - name: Build OCI image
+        run: ./scripts/build-podman.sh "${{ matrix.distro }}" "localhost/${{ matrix.image }}:${{ matrix.version }}-test"
+      - name: Test SSH password image contract
         run: |
-          ./scripts/build-podman.sh "localhost/alpine-base:${ALPINE_VERSION}-test"
-
-      - name: Test container starts
-        run: |
-          printf '%s' 'TestPassword123!' > /tmp/root_password
-          podman secret create alpine_root_password /tmp/root_password
-          podman run -d --name alpine-ci-test \
-            -p 2222:22 \
-            --secret alpine_root_password,target=root_password \
-            localhost/alpine-base:${ALPINE_VERSION}-test
+          printf '%s' 'TestPassword123!' >/tmp/root_password
+          podman secret create root_password /tmp/root_password
+          podman run -d --name image-ci-test -p 2222:22 --secret root_password,target=root_password \
+            "localhost/${{ matrix.image }}:${{ matrix.version }}-test"
           sleep 5
-          STATUS=$(podman inspect alpine-ci-test --format='{{.State.Status}}')
-          echo "Container status: $STATUS"
-          podman logs alpine-ci-test
-          if [ "$STATUS" != "running" ]; then
-            echo "ERROR: container did not stay running (status=$STATUS)"
-            podman inspect alpine-ci-test --format='{{.State.ExitCode}}: {{.State.Error}}'
-            exit 1
-          fi
-
-      - name: Verify sshd listening
-        run: |
-          podman ps -a
-          podman inspect alpine-ci-test --format='Status={{.State.Status}} ExitCode={{.State.ExitCode}}'
-          podman exec alpine-ci-test sh -c 'ss -lntp | grep :22 || netstat -tlnp | grep :22'
-          podman exec alpine-ci-test sshd -T | grep '^permitrootlogin yes'
-          podman exec alpine-ci-test sshd -T | grep '^passwordauthentication yes'
-
+          test "$(podman inspect image-ci-test --format='{{.State.Status}}')" = running
+          podman exec image-ci-test sh -c 'ss -lntp | grep :22 || netstat -tlnp | grep :22'
+          podman exec image-ci-test sshd -T | grep '^permitrootlogin yes'
+          podman exec image-ci-test sshd -T | grep '^passwordauthentication yes'
       - name: Push to GHCR
         if: github.event_name != 'pull_request'
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.repository_owner }} --password-stdin
-          STABLE=ghcr.io/${{ github.repository_owner }}/alpine-base:${ALPINE_VERSION}
-          LATEST=ghcr.io/${{ github.repository_owner }}/alpine-base:latest
-          podman tag localhost/alpine-base:${ALPINE_VERSION}-test "$STABLE"
-          podman push "$STABLE"
-          podman tag localhost/alpine-base:${ALPINE_VERSION}-test "$LATEST"
-          podman push "$LATEST"
-          echo "Pushed: $STABLE"
-          echo "Pushed: $LATEST"
-
-      - name: Push versioned tag to GHCR
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.repository_owner }} --password-stdin
-          TAG=$(echo "${GITHUB_REF#refs/tags/}" | tr -d 'v')
-          IMMUTABLE=ghcr.io/${{ github.repository_owner }}/alpine-base:${ALPINE_VERSION}-${TAG}
-          podman tag localhost/alpine-base:${ALPINE_VERSION}-test "$IMMUTABLE"
-          podman push "$IMMUTABLE"
-          echo "Pushed: $IMMUTABLE"
-
-      - name: Save OCI image to tarball
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+          stable="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ matrix.version }}"
+          latest="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest"
+          podman tag "localhost/${{ matrix.image }}:${{ matrix.version }}-test" "$stable"
+          podman tag "localhost/${{ matrix.image }}:${{ matrix.version }}-test" "$latest"
+          podman push "$stable" && podman push "$latest"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            immutable="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ matrix.version }}-${GITHUB_REF#refs/tags/v}"
+            podman tag "localhost/${{ matrix.image }}:${{ matrix.version }}-test" "$immutable"
+            podman push "$immutable"
+          fi
+      - name: Save OCI image artifact
         run: |
           mkdir -p output/podman
-          podman save -o output/podman/alpine-base-${ALPINE_VERSION}-podman.tar \
-            localhost/alpine-base:${ALPINE_VERSION}-test
-          ls -lh output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
-
-      - name: Upload Podman image artifact
-        uses: actions/upload-artifact@v7
+          podman save -o "output/podman/${{ matrix.image }}-${{ matrix.version }}-podman.tar" \
+            "localhost/${{ matrix.image }}:${{ matrix.version }}-test"
+      - uses: actions/upload-artifact@v7
         with:
-          name: alpine-3.24-podman
-          path: output/podman/alpine-base-${{ env.ALPINE_VERSION }}-podman.tar
+          name: ${{ matrix.distro }}-${{ matrix.version }}-podman
+          path: output/podman/${{ matrix.image }}-${{ matrix.version }}-podman.tar
           if-no-files-found: error
-
       - name: Cleanup
         if: always()
         run: |
-          podman rm -f alpine-ci-test 2>/dev/null || true
-          podman secret rm alpine_root_password 2>/dev/null || true
+          podman rm -f image-ci-test 2>/dev/null || true
+          podman secret rm root_password 2>/dev/null || true
 
-  # --- Incus image build ---
-  # distrobuilder only needs a Linux host; Incus daemon is NOT required to
-  # produce the image tarball. The resulting artifact can be imported with:
-  #   incus image import incus.tar.xz rootfs.squashfs --alias alpine/3.24-test
-  # Full SSH verification still requires a host with Incus installed.
   build-incus:
-    name: Build Incus Image
+    name: Build Incus ${{ matrix.distro }} image
     needs: validate
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { distro: alpine, version: "3.24" }
+          - { distro: debian, version: "13" }
     steps:
       - uses: actions/checkout@v7
-
-      - name: Ensure scripts are executable
-        run: chmod +x scripts/*.sh
-
-      - name: Install distrobuilder (snap)
+      - name: Install distrobuilder
         run: |
           sudo apt-get update
           sudo apt-get install -y snapd
           sudo snap install distrobuilder --classic
-
       - name: Build Incus image
+        run: sudo ./scripts/build-incus.sh "${{ matrix.distro }}"
+      - name: Verify Incus rootfs image contract
         run: |
-          sudo ./scripts/build-incus.sh
-
-      - name: Verify Incus init and cloud-init runtime
-        run: |
-          sudo rm -rf /tmp/alpine-incus-rootfs
-          sudo unsquashfs -d /tmp/alpine-incus-rootfs output/incus/rootfs.squashfs >/dev/null
-          test -x /tmp/alpine-incus-rootfs/sbin/openrc
-          test -x /tmp/alpine-incus-rootfs/usr/bin/cloud-init
-          test -x /tmp/alpine-incus-rootfs/etc/init.d/sshd
-          test -x /tmp/alpine-incus-rootfs/etc/init.d/incus-cloud-init-compat
-          test -x /tmp/alpine-incus-rootfs/etc/init.d/cloud-init-local
-          grep -q 'datasource_list: \[ LXD, None \]' /tmp/alpine-incus-rootfs/etc/cloud/cloud.cfg.d/90-incus-datasource.cfg
-          # OpenRC runlevel entries are absolute symlinks into /etc/init.d;
-          # after extraction under /tmp, `test -e` follows them against the
-          # runner root. Check the symlink itself instead.
-          test -L /tmp/alpine-incus-rootfs/etc/runlevels/default/sshd
-          test -L /tmp/alpine-incus-rootfs/etc/runlevels/boot/incus-cloud-init-compat
-          test -L /tmp/alpine-incus-rootfs/etc/runlevels/boot/cloud-init-local
-          test -L /tmp/alpine-incus-rootfs/etc/runlevels/default/cloud-final
-
-      - name: Generate simple-streams tree
-        run: |
-          python3 scripts/generate-streams.py \
-            --input-dir output/incus \
-            --output-dir incus-server/www
-          python3 scripts/validate-streams.py incus-server/www
-
-      - name: Upload Incus image artifacts
-        uses: actions/upload-artifact@v7
+          sudo unsquashfs -d "/tmp/${{ matrix.distro }}-incus-rootfs" "output/incus/${{ matrix.distro }}/rootfs.squashfs" >/dev/null
+          root="/tmp/${{ matrix.distro }}-incus-rootfs"
+          test -x "$root/usr/bin/cloud-init"
+          grep -q 'datasource_list: \[ LXD, None \]' "$root/etc/cloud/cloud.cfg.d/90-incus-datasource.cfg"
+          grep -q '^PermitRootLogin yes' "$root/etc/ssh/sshd_config"
+          grep -q '^PasswordAuthentication yes' "$root/etc/ssh/sshd_config"
+          if [ "${{ matrix.distro }}" = alpine ]; then
+            test -x "$root/sbin/openrc" && test -x "$root/etc/init.d/sshd"
+          else
+            test -x "$root/usr/sbin/sshd" && test -e "$root/lib/systemd/system/ssh.service"
+          fi
+      - uses: actions/upload-artifact@v7
         with:
-          name: alpine-3.24-incus
+          name: ${{ matrix.distro }}-${{ matrix.version }}-incus
           path: |
-            output/incus/incus.tar.xz
-            output/incus/rootfs.squashfs
+            output/incus/${{ matrix.distro }}/incus.tar.xz
+            output/incus/${{ matrix.distro }}/rootfs.squashfs
           if-no-files-found: error
 
-      - name: Upload Incus simple-streams artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: alpine-3.24-incus-streams
-          path: incus-server/www
-          if-no-files-found: error
-
-  # --- GitHub Release: tag releases + rolling 'continuous' release ---
   release:
     name: Create GitHub Release
     needs: [build-podman, build-incus]
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     permissions:
       contents: write
       packages: write
     steps:
       - uses: actions/checkout@v7
-
-      - name: Download Incus artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: alpine-3.24-incus
-          path: output/incus
-
-      - name: Download Incus simple-streams artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: alpine-3.24-incus-streams
-          path: incus-server/www
-
-      - name: Download Podman image artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: alpine-3.24-podman
-          path: output/podman
-
+      - uses: actions/download-artifact@v8
+        with: { name: alpine-3.24-incus, path: output/incus/alpine }
+      - uses: actions/download-artifact@v8
+        with: { name: debian-13-incus, path: output/incus/debian }
+      - uses: actions/download-artifact@v8
+        with: { name: alpine-3.24-podman, path: output/podman }
+      - uses: actions/download-artifact@v8
+        with: { name: debian-13-podman, path: output/podman }
+      - name: Build and validate combined simple-streams tree
+        run: |
+          python3 scripts/generate-streams.py --clean --output-dir incus-server/www \
+            --build-id "$(date -u +%Y%m%d)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
+            --image alpine:${ALPINE_VERSION}:output/incus/alpine \
+            --image debian:${DEBIAN_VERSION}:output/incus/debian
+          python3 scripts/validate-streams.py incus-server/www
+          tar -czf incus-streams.tar.gz -C incus-server/www .
+          # Keep the original Alpine asset names for existing install.sh users.
+          cp output/incus/alpine/incus.tar.xz incus.tar.xz
+          cp output/incus/alpine/rootfs.squashfs rootfs.squashfs
+          cp output/incus/debian/incus.tar.xz debian-13-incus.tar.xz
+          cp output/incus/debian/rootfs.squashfs debian-13-rootfs.squashfs
       - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tar -czf incus-streams.tar.gz -C incus-server/www .
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-            gh release create "$TAG" \
-              output/incus/incus.tar.xz \
-              output/incus/rootfs.squashfs \
-              incus-streams.tar.gz \
-              output/podman/alpine-base-${ALPINE_VERSION}-podman.tar \
-              --generate-notes
+          assets=(
+            incus.tar.xz rootfs.squashfs debian-13-incus.tar.xz debian-13-rootfs.squashfs
+            incus-streams.tar.gz
+            output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
+            output/podman/debian-base-${DEBIAN_VERSION}-podman.tar
+          )
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            gh release create "${GITHUB_REF#refs/tags/}" "${assets[@]}" --generate-notes
           else
-            # Rolling prerelease for main branch so assets are always downloadable
-            # without relying on GHCR package visibility.
             gh release delete continuous --yes 2>/dev/null || true
-            gh release create continuous \
-              --target main \
-              --prerelease \
+            gh release create continuous --target "$GITHUB_SHA" --prerelease \
               --title "Continuous build" \
-              --notes "Rolling release from the latest main branch commit (${GITHUB_SHA})." \
-              output/incus/incus.tar.xz \
-              output/incus/rootfs.squashfs \
-              incus-streams.tar.gz \
-              output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
-          fi
+              --notes "Rolling Alpine 3.24 + Debian 13 build from ${GITHUB_SHA}." \
+              "${assets[@]}"

@@ -9,16 +9,22 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "##############################################"
-echo "#  Alpine Base — Build All (Podman + Incus)    #"
+echo "#  Custom Base — Build Alpine + Debian          #"
 echo "##############################################"
 echo ""
 
-echo "--- [1/2] Building Incus image ---"
-"$REPO_ROOT/scripts/build-incus.sh"
+echo "--- [1/4] Building Alpine Incus image ---"
+"$REPO_ROOT/scripts/build-incus.sh" alpine
 
 echo ""
-echo "--- [2/2] Building Podman image ---"
-"$REPO_ROOT/scripts/build-podman.sh"
+echo "--- [2/4] Building Alpine Podman image ---"
+"$REPO_ROOT/scripts/build-podman.sh" alpine
+
+echo "--- [3/4] Building Debian Incus image ---"
+"$REPO_ROOT/scripts/build-incus.sh" debian
+
+echo "--- [4/4] Building Debian Podman image ---"
+"$REPO_ROOT/scripts/build-podman.sh" debian
 
 echo ""
 echo "##############################################"

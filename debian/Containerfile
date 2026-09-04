@@ -1,0 +1,21 @@
+FROM docker.io/library/debian:13-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Keep the runtime feature set equivalent to the Alpine OCI image: SSH password
+# login, network diagnostics, and the tools used by runman-agent configuration.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bash ca-certificates curl wget jq tzdata iproute2 iputils-ping \
+      dnsutils netcat-openbsd openssh-server openssh-client passwd nano \
+      util-linux procps \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /run/sshd
+
+COPY common/sshd_config /etc/ssh/sshd_config
+COPY podman/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 0755 /usr/local/bin/entrypoint.sh \
+ && rm -f /etc/ssh/ssh_host_*
+
+EXPOSE 22
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
