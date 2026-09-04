@@ -8,6 +8,10 @@ source:
   suite: trixie
   variant: minbase
 
+# distrobuilder reports the host as x86_64 while debootstrap expects amd64.
+mappings:
+  architecture_map: debian
+
 packages:
   manager: apt
   update: true
