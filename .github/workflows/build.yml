@@ -202,3 +202,4 @@ jobs:
               --title "Continuous build" \
               --notes "Rolling Alpine 3.24 + Debian 13 build from ${GITHUB_SHA}." \
               "${assets[@]}"
+          fi
