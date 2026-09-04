@@ -128,7 +128,7 @@ jobs:
       - name: Install distrobuilder
         run: |
           sudo apt-get update
-          sudo apt-get install -y snapd
+          sudo apt-get install -y snapd debootstrap
           sudo snap install distrobuilder --classic
       - name: Build Incus image
         run: sudo ./scripts/build-incus.sh "${{ matrix.distro }}"
