@@ -79,12 +79,15 @@ alpine-base/
 ### Incus (System Container)
 
 ```bash
-# 构建 Alpine 或 Debian（不传参数时保持 Alpine 兼容）
-./scripts/build-incus.sh alpine
-./scripts/build-incus.sh debian
+# 在当前原生架构上构建 Alpine 或 Debian
+./scripts/build-incus.sh alpine amd64
+./scripts/build-incus.sh debian amd64
+# ARM64 请在 ARM64 主机或 CI 的 ubuntu-24.04-arm runner 上执行
+# ./scripts/build-incus.sh alpine arm64
 
 # 导入 Image Store
-incus image import output/incus/alpine/incus.tar.xz output/incus/alpine/rootfs.squashfs \
+incus image import output/incus/alpine/amd64/incus.tar.xz \
+  output/incus/alpine/amd64/rootfs.squashfs \
   --alias alpine/3.24-test
 
 # 启动实例
@@ -282,7 +285,9 @@ podman run -d --name alpine -p 2222:22 \
 > | `alpine-base-3.24-podman.tar` | `continuous` / `v*` | `podman load -i` 直接加载 |
 > | `debian-base-13-podman.tar` | `continuous` / `v*` | Debian OCI，`podman load -i` 直接加载 |
 > | `incus.tar.xz` + `rootfs.squashfs` | `continuous` / `v*` | Alpine `incus image import`（兼容旧名称） |
+> | `alpine-3.24-arm64-incus.tar.xz` + `alpine-3.24-arm64-rootfs.squashfs` | `continuous` / `v*` | Alpine ARM64 `incus image import` |
 > | `debian-13-incus.tar.xz` + `debian-13-rootfs.squashfs` | `continuous` / `v*` | Debian `incus image import` |
+> | `debian-13-arm64-incus.tar.xz` + `debian-13-arm64-rootfs.squashfs` | `continuous` / `v*` | Debian ARM64 `incus image import` |
 > | `incus-streams.tar.gz` | `continuous` / `v*` | 自建 simple-streams 镜像源 |
 
 ### Incus（从 Release 产物或 CI 产物导入）
@@ -290,7 +295,7 @@ podman run -d --name alpine -p 2222:22 \
 Incus 是 System Container，**不进 GHCR**（GHCR 只存 OCI 镜像）。两种方式获取：
 
 - **Release 资产**：到 [Releases](https://github.com/podcctv/alpine-base/releases) 下载 `incus.tar.xz` + `rootfs.squashfs`
-- **CI 产物**：到 Actions → 最新 `Build & Test` → 下载 `alpine-3.24-incus` 或 `debian-13-incus`
+- **CI 产物**：到 Actions → 最新 `Build & Test` → 下载带架构的产物，例如 `alpine-3.24-arm64-incus`
 
 导入到本机 Incus：
 
@@ -319,16 +324,18 @@ release 在同一天更新时出现新清单与旧缓存文件的哈希错配。
 ### 1. 生成 simple-streams 树
 
 ```bash
-# 同时收录 Alpine 与 Debian；单一 Alpine 构建仍可只使用 --input-dir
+# 同时收录 Alpine/ Debian 的 amd64 与 arm64 原生构建
 ./scripts/generate-streams.py --clean \
-  --image alpine:3.24:output/incus/alpine \
-  --image debian:13:output/incus/debian \
+  --image alpine:3.24:amd64:output/incus/alpine/amd64 \
+  --image alpine:3.24:arm64:output/incus/alpine/arm64 \
+  --image debian:13:amd64:output/incus/debian/amd64 \
+  --image debian:13:arm64:output/incus/debian/arm64 \
   --output-dir incus-server/www
 python3 scripts/validate-streams.py incus-server/www
 ```
 
-CI 在每次 `Build Incus Image` 时也会自动生成，并作为
-`alpine-3.24-incus-streams` 产物 / Release 的 `incus-streams.tar.gz` 提供。
+CI 在每次 `Build Incus Image` 时使用 x64/ARM64 原生 runner 分别构建，
+再合并到 Release 的 `incus-streams.tar.gz`。Incus 客户端会自动选择与宿主机匹配的架构。
 下载解压到 `incus-server/www` 即可：
 
 ```bash
@@ -388,14 +395,15 @@ simple-streams 支持在同一个镜像源里挂多份镜像，每份对应一�
 
 ```bash
 # 在装有 Incus 的构建机上，导入多张镜像并起不同 alias
-incus image import output/incus/incus.tar.xz output/incus/rootfs.squashfs \
+incus image import output/incus/alpine/amd64/incus.tar.xz \
+  output/incus/alpine/amd64/rootfs.squashfs \
   --alias alpine/3.24/base
 incus image import ./other/incus-dev.tar.xz ./other/rootfs.squashfs \
   --alias alpine/3.24/dev
 
 # 重新生成 simple-streams 树（扫描本地镜像库里匹配规则的全部镜像）
 ./scripts/generate-streams.py \
-  --input-dir output/incus \
+  --input-dir output/incus/alpine/amd64 \
   --output-dir incus-server/www
 
 # 重启镜像源服务，客户端即可看到全部 alias
@@ -410,8 +418,9 @@ incus launch alpine-base:alpine/3.24/base my-base
 incus launch alpine-base:alpine/3.24/dev  my-dev
 ```
 
-> `generate-streams.py` 兼容单一 Alpine 的旧 `--input-dir` 调用，也支持重复传入
-> `--image OS:RELEASE:DIR`，因此可在同一个源中发布 Alpine、Debian 和更多定制镜像。
+> `generate-streams.py` 兼容单一 Alpine 的旧 `--input-dir` 及
+> `--image OS:RELEASE:DIR` 调用；多架构发布使用
+> `--image OS:RELEASE:ARCH:DIR`。
 
 > 安全提示：镜像源默认 **HTTP 且未签名**。内网/自用没问题；要公网暴露建议
 > 套一层 HTTPS 反向代理，并给 `images.json` / `index.json` 做 GPG 签名

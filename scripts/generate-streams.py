@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 DEFAULT_OS = "alpine"
 DEFAULT_ARCH = "amd64"
 DEFAULT_VARIANT = "default"
+SUPPORTED_ARCHES = {"amd64", "arm64"}
 
 
 def sha256_of(path: str) -> str:
@@ -71,10 +72,10 @@ def now_iso() -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--input-dir", default="output/incus/alpine",
+    ap.add_argument("--input-dir", default="output/incus/alpine/amd64",
                     help="Legacy single-image input directory")
-    ap.add_argument("--image", action="append", default=[], metavar="OS:RELEASE:DIR",
-                    help="Image to publish; repeat for multiple OS releases")
+    ap.add_argument("--image", action="append", default=[], metavar="OS:RELEASE[:ARCH]:DIR",
+                    help="Image to publish; repeat for multiple releases/architectures")
     ap.add_argument("--output-dir", default="incus-server/www",
                     help="Web root; simple-streams tree is written under <out>/streams/v1")
     ap.add_argument("--version", default=None,
@@ -114,11 +115,21 @@ def main() -> int:
     products = {}
     for spec in specs:
         try:
-            os_name, version, in_dir = spec.split(":", 2)
+            os_name, version, remainder = spec.split(":", 2)
         except ValueError:
-            sys.exit(f"ERROR: --image must be OS:RELEASE:DIR, got {spec!r}")
+            sys.exit(f"ERROR: --image must be OS:RELEASE[:ARCH]:DIR, got {spec!r}")
+        arch_candidate, separator, arch_path = remainder.partition(":")
+        canonical_candidate = {"x86_64": "amd64", "aarch64": "arm64"}.get(
+            arch_candidate.strip().lower(), arch_candidate.strip().lower()
+        )
+        if separator and canonical_candidate in SUPPORTED_ARCHES:
+            arch, in_dir = canonical_candidate, arch_path
+        else:
+            arch, in_dir = args.arch, remainder
         os_name, version = os_name.strip().lower(), version.strip().lstrip("v")
-        if not os_name or not version:
+        arch = arch.strip().lower()
+        arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(arch, arch)
+        if not os_name or not version or arch not in SUPPORTED_ARCHES:
             sys.exit(f"ERROR: invalid --image {spec!r}")
         in_dir = os.path.abspath(in_dir)
         meta_tar, rootfs = os.path.join(in_dir, "incus.tar.xz"), os.path.join(in_dir, "rootfs.squashfs")
@@ -126,7 +137,7 @@ def main() -> int:
             if not os.path.isfile(path):
                 sys.exit(f"ERROR: missing {path} — build {os_name} Incus image first")
 
-        arch, variant = args.arch, args.variant
+        variant = args.variant
         product = f"{os_name}:{version}:{arch}:{variant}"
         if product in products:
             sys.exit(f"ERROR: duplicate simple-streams product {product}")

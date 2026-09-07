@@ -67,6 +67,9 @@ def validate(root: pathlib.Path) -> int:
     for product_name, product in images.get("products", {}).items():
         if not isinstance(product.get("arch"), str) or not product["arch"]:
             raise ValueError(f"product {product_name} has no Incus-compatible arch field")
+        product_parts = product_name.split(":")
+        if len(product_parts) != 4 or product_parts[2] != product["arch"]:
+            raise ValueError(f"product {product_name} architecture does not match its arch field")
         if not isinstance(product.get("aliases"), str) or not product["aliases"]:
             raise ValueError(f"product {product_name} aliases must be a comma-separated string")
         for version_name, version in product.get("versions", {}).items():

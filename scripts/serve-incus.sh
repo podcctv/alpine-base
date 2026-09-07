@@ -8,7 +8,7 @@
 #
 # It automatically obtains the image tree (in order of preference):
 #   1. an existing incus-server/www/streams/v1/index.json  (already prepared)
-#   2. local builds in output/incus/{alpine,debian}/         (run build-all.sh)
+#   2. local builds in output/incus/{alpine,debian}/{amd64,arm64}/
 #   3. the incus-streams.tar.gz asset from the rolling `continuous` release
 #      (downloaded over the public URL — no login needed for a public repo)
 #
@@ -92,20 +92,27 @@ ensure_streams() {
     echo "[streams] using existing tree at $WWW_DIR"
     return
   fi
-  if [ "$FORCE_DOWNLOAD" = 0 ] \
-     && [ -f output/incus/alpine/incus.tar.xz ] && [ -f output/incus/alpine/rootfs.squashfs ]; then
-    echo "[streams] generating from local Incus outputs ..."
-    need python3
-    if [ -f output/incus/debian/incus.tar.xz ] && [ -f output/incus/debian/rootfs.squashfs ]; then
-      python3 scripts/generate-streams.py --clean --output-dir "$WWW_DIR" \
-        --image "alpine:$(tr -d '[:space:]' < VERSION):output/incus/alpine" \
-        --image "debian:$(tr -d '[:space:]' < debian/VERSION):output/incus/debian"
-    else
-      python3 scripts/generate-streams.py --clean \
-        --input-dir output/incus/alpine \
-        --output-dir "$WWW_DIR"
+  if [ "$FORCE_DOWNLOAD" = 0 ]; then
+    set -- --clean --output-dir "$WWW_DIR"
+    FOUND_LOCAL=0
+    for spec in \
+      "alpine:$(tr -d '[:space:]' < VERSION):amd64:output/incus/alpine/amd64" \
+      "alpine:$(tr -d '[:space:]' < VERSION):arm64:output/incus/alpine/arm64" \
+      "debian:$(tr -d '[:space:]' < debian/VERSION):amd64:output/incus/debian/amd64" \
+      "debian:$(tr -d '[:space:]' < debian/VERSION):arm64:output/incus/debian/arm64"
+    do
+      path=${spec#*:*:*:}
+      if [ -f "$path/incus.tar.xz" ] && [ -f "$path/rootfs.squashfs" ]; then
+        set -- "$@" --image "$spec"
+        FOUND_LOCAL=1
+      fi
+    done
+    if [ "$FOUND_LOCAL" = 1 ]; then
+      echo "[streams] generating from local Incus outputs ..."
+      need python3
+      python3 scripts/generate-streams.py "$@"
+      return
     fi
-    return
   fi
   echo "[streams] downloading incus-streams.tar.gz from release '$RELEASE_TAG' ..."
   TMP="$(mktemp -d)"

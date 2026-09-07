@@ -36,18 +36,24 @@ jobs:
           python3 -m py_compile scripts/generate-streams.py scripts/validate-streams.py
       - name: Validate combined Alpine and Debian simple-streams
         run: |
-          mkdir -p /tmp/alpine /tmp/debian /tmp/streams
-          printf alpine-meta >/tmp/alpine/incus.tar.xz
-          printf alpine-rootfs >/tmp/alpine/rootfs.squashfs
-          printf debian-meta >/tmp/debian/incus.tar.xz
-          printf debian-rootfs >/tmp/debian/rootfs.squashfs
+          for spec in alpine-amd64 alpine-arm64 debian-amd64 debian-arm64; do
+            mkdir -p "/tmp/$spec"
+            printf '%s-meta' "$spec" >"/tmp/$spec/incus.tar.xz"
+            printf '%s-rootfs' "$spec" >"/tmp/$spec/rootfs.squashfs"
+          done
           python3 scripts/generate-streams.py --clean --output-dir /tmp/streams --build-id 20260904_000000 \
-            --image alpine:${ALPINE_VERSION}:/tmp/alpine --image debian:${DEBIAN_VERSION}:/tmp/debian
+            --image alpine:${ALPINE_VERSION}:amd64:/tmp/alpine-amd64 \
+            --image alpine:${ALPINE_VERSION}:arm64:/tmp/alpine-arm64 \
+            --image debian:${DEBIAN_VERSION}:amd64:/tmp/debian-amd64 \
+            --image debian:${DEBIAN_VERSION}:arm64:/tmp/debian-arm64
           python3 scripts/validate-streams.py /tmp/streams
           python3 - <<'PY'
           import json
           with open('/tmp/streams/streams/v1/images.json') as f:
-              assert set(json.load(f)['products']) == {'alpine:3.24:amd64:default', 'debian:13:amd64:default'}
+              assert set(json.load(f)['products']) == {
+                  'alpine:3.24:amd64:default', 'alpine:3.24:arm64:default',
+                  'debian:13:amd64:default', 'debian:13:arm64:default',
+              }
           PY
       - name: Check ignore rules
         run: |
@@ -115,14 +121,16 @@ jobs:
           podman secret rm root_password 2>/dev/null || true
 
   build-incus:
-    name: Build Incus ${{ matrix.distro }} image
+    name: Build Incus ${{ matrix.distro }} ${{ matrix.arch }} image
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
-          - { distro: alpine, version: "3.24" }
-          - { distro: debian, version: "13" }
+          - { distro: alpine, version: "3.24", arch: amd64, metadata_arch: x86_64, elf_pattern: x86-64, runner: ubuntu-24.04 }
+          - { distro: alpine, version: "3.24", arch: arm64, metadata_arch: aarch64, elf_pattern: "ARM aarch64", runner: ubuntu-24.04-arm }
+          - { distro: debian, version: "13", arch: amd64, metadata_arch: x86_64, elf_pattern: x86-64, runner: ubuntu-24.04 }
+          - { distro: debian, version: "13", arch: arm64, metadata_arch: aarch64, elf_pattern: "ARM aarch64", runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v7
       - name: Install distrobuilder
@@ -131,11 +139,15 @@ jobs:
           sudo apt-get install -y snapd debootstrap
           sudo snap install distrobuilder --classic
       - name: Build Incus image
-        run: sudo ./scripts/build-incus.sh "${{ matrix.distro }}"
+        run: sudo ./scripts/build-incus.sh "${{ matrix.distro }}" "${{ matrix.arch }}"
       - name: Verify Incus rootfs image contract
         run: |
-          sudo unsquashfs -d "/tmp/${{ matrix.distro }}-incus-rootfs" "output/incus/${{ matrix.distro }}/rootfs.squashfs" >/dev/null
-          root="/tmp/${{ matrix.distro }}-incus-rootfs"
+          metadata="output/incus/${{ matrix.distro }}/${{ matrix.arch }}/incus.tar.xz"
+          test "$(tar -xOf "$metadata" metadata.yaml | awk '/^architecture:/ {print $2; exit}')" = "${{ matrix.metadata_arch }}"
+          sudo unsquashfs -d "/tmp/${{ matrix.distro }}-${{ matrix.arch }}-incus-rootfs" \
+            "output/incus/${{ matrix.distro }}/${{ matrix.arch }}/rootfs.squashfs" >/dev/null
+          root="/tmp/${{ matrix.distro }}-${{ matrix.arch }}-incus-rootfs"
+          file -L "$root/bin/sh" | grep -F '${{ matrix.elf_pattern }}'
           test -x "$root/usr/bin/cloud-init"
           grep -q 'datasource_list: \[ LXD, None \]' "$root/etc/cloud/cloud.cfg.d/90-incus-datasource.cfg"
           grep -q '^PermitRootLogin yes' "$root/etc/ssh/sshd_config"
@@ -147,10 +159,10 @@ jobs:
           fi
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.distro }}-${{ matrix.version }}-incus
+          name: ${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}-incus
           path: |
-            output/incus/${{ matrix.distro }}/incus.tar.xz
-            output/incus/${{ matrix.distro }}/rootfs.squashfs
+            output/incus/${{ matrix.distro }}/${{ matrix.arch }}/incus.tar.xz
+            output/incus/${{ matrix.distro }}/${{ matrix.arch }}/rootfs.squashfs
           if-no-files-found: error
 
   release:
@@ -164,9 +176,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
-        with: { name: alpine-3.24-incus, path: output/incus/alpine }
+        with: { name: alpine-3.24-amd64-incus, path: output/incus/alpine/amd64 }
       - uses: actions/download-artifact@v8
-        with: { name: debian-13-incus, path: output/incus/debian }
+        with: { name: alpine-3.24-arm64-incus, path: output/incus/alpine/arm64 }
+      - uses: actions/download-artifact@v8
+        with: { name: debian-13-amd64-incus, path: output/incus/debian/amd64 }
+      - uses: actions/download-artifact@v8
+        with: { name: debian-13-arm64-incus, path: output/incus/debian/arm64 }
       - uses: actions/download-artifact@v8
         with: { name: alpine-3.24-podman, path: output/podman }
       - uses: actions/download-artifact@v8
@@ -175,21 +191,30 @@ jobs:
         run: |
           python3 scripts/generate-streams.py --clean --output-dir incus-server/www \
             --build-id "$(date -u +%Y%m%d)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
-            --image alpine:${ALPINE_VERSION}:output/incus/alpine \
-            --image debian:${DEBIAN_VERSION}:output/incus/debian
+            --image alpine:${ALPINE_VERSION}:amd64:output/incus/alpine/amd64 \
+            --image alpine:${ALPINE_VERSION}:arm64:output/incus/alpine/arm64 \
+            --image debian:${DEBIAN_VERSION}:amd64:output/incus/debian/amd64 \
+            --image debian:${DEBIAN_VERSION}:arm64:output/incus/debian/arm64
           python3 scripts/validate-streams.py incus-server/www
           tar -czf incus-streams.tar.gz -C incus-server/www .
           # Keep the original Alpine asset names for existing install.sh users.
-          cp output/incus/alpine/incus.tar.xz incus.tar.xz
-          cp output/incus/alpine/rootfs.squashfs rootfs.squashfs
-          cp output/incus/debian/incus.tar.xz debian-13-incus.tar.xz
-          cp output/incus/debian/rootfs.squashfs debian-13-rootfs.squashfs
+          cp output/incus/alpine/amd64/incus.tar.xz incus.tar.xz
+          cp output/incus/alpine/amd64/rootfs.squashfs rootfs.squashfs
+          cp output/incus/alpine/arm64/incus.tar.xz alpine-3.24-arm64-incus.tar.xz
+          cp output/incus/alpine/arm64/rootfs.squashfs alpine-3.24-arm64-rootfs.squashfs
+          cp output/incus/debian/amd64/incus.tar.xz debian-13-incus.tar.xz
+          cp output/incus/debian/amd64/rootfs.squashfs debian-13-rootfs.squashfs
+          cp output/incus/debian/arm64/incus.tar.xz debian-13-arm64-incus.tar.xz
+          cp output/incus/debian/arm64/rootfs.squashfs debian-13-arm64-rootfs.squashfs
       - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           assets=(
-            incus.tar.xz rootfs.squashfs debian-13-incus.tar.xz debian-13-rootfs.squashfs
+            incus.tar.xz rootfs.squashfs
+            alpine-3.24-arm64-incus.tar.xz alpine-3.24-arm64-rootfs.squashfs
+            debian-13-incus.tar.xz debian-13-rootfs.squashfs
+            debian-13-arm64-incus.tar.xz debian-13-arm64-rootfs.squashfs
             incus-streams.tar.gz
             output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
             output/podman/debian-base-${DEBIAN_VERSION}-podman.tar
