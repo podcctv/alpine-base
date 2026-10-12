@@ -28,6 +28,9 @@ jobs:
             grep -q '^ *PermitEmptyPasswords no' "$f"
           done
           grep -q 'cloud-init' incus/image.yaml
+          grep -q 'htop' incus/image.yaml
+          grep -q 'ncurses-terminfo-base' incus/image.yaml
+          grep -q 'TERM=xterm-256color' incus/image.yaml
           grep -q 'cloud-init' debian/incus.yaml
           grep -q 'debian:13-slim' debian/Containerfile
       - name: Shell and Python syntax checks
@@ -154,6 +157,9 @@ jobs:
           grep -q '^PasswordAuthentication yes' "$root/etc/ssh/sshd_config"
           if [ "${{ matrix.distro }}" = alpine ]; then
             test -x "$root/sbin/openrc" && test -x "$root/etc/init.d/sshd"
+            test -x "$root/usr/bin/htop"
+            test -f "$root/etc/profile.d/20-terminal-fallback.sh"
+            grep -q 'TERM=xterm-256color' "$root/etc/profile.d/20-terminal-fallback.sh"
           else
             test -x "$root/usr/sbin/sshd" && test -e "$root/lib/systemd/system/ssh.service"
           fi

@@ -32,6 +32,8 @@ packages:
         - nano
         - util-linux
         - procps-ng
+        - htop
+        - ncurses-terminfo-base
       action: install
 
 files:
@@ -61,6 +63,17 @@ files:
       # Restrict probing so an unavailable socket never falls through to a
       # multi-minute EC2 metadata lookup.
       datasource_list: [ LXD, None ]
+
+  - path: /etc/profile.d/20-terminal-fallback.sh
+    generator: dump
+    mode: 0644
+    content: |-
+      # Web consoles occasionally create an interactive shell with TERM=unknown.
+      # Full-screen ncurses applications (for example htop) cannot start in that
+      # state. Preserve every valid terminal value supplied by the client.
+      case "${TERM-}" in
+          ''|unknown) export TERM=xterm-256color ;;
+      esac
 
   - path: /etc/init.d/incus-cloud-init-compat
     generator: dump
@@ -103,6 +116,15 @@ actions:
 
       echo "=== Creating /run/sshd ==="
       mkdir -p /run/sshd
+
+      echo "=== Enabling a safe interactive terminal fallback ==="
+      # /etc/profile covers login shells. Alpine's bashrc is also updated so
+      # interactive non-login Bash shells receive the same fallback.
+      for shellrc in /etc/profile /etc/bash/bashrc; do
+          [ -f "$shellrc" ] || continue
+          grep -q '20-terminal-fallback.sh' "$shellrc" || \
+              printf '\n[ -r /etc/profile.d/20-terminal-fallback.sh ] && . /etc/profile.d/20-terminal-fallback.sh\n' >> "$shellrc"
+      done
 
       echo "=== Cleaning host keys (per-instance generation) ==="
       rm -f /etc/ssh/ssh_host_*
