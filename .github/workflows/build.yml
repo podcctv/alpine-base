@@ -99,8 +99,13 @@ jobs:
           podman exec image-ci-test sshd -T | grep '^permitrootlogin yes'
           podman exec image-ci-test sshd -T | grep '^passwordauthentication yes'
           if [ "${{ matrix.distro }}" = alpine ]; then
-            installed="$(podman exec image-ci-test apk info -v openssh-server)"
-            test "$installed" = "openssh-server-${ALPINE_OPENSSH_FIXED_VERSION}"
+            installed="$(podman exec image-ci-test awk '
+              /^P:openssh-server$/ { wanted=1; next }
+              wanted && /^V:/ { sub(/^V:/, ""); print; exit }
+              wanted && /^[A-Z]:/ { wanted=0 }
+            ' /lib/apk/db/installed)"
+            printf 'Built OpenSSH server package version: %s\n' "$installed"
+            test "$installed" = "$ALPINE_OPENSSH_FIXED_VERSION"
           fi
       - name: Push to GHCR
         if: github.event_name != 'pull_request'
