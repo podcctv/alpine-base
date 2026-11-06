@@ -45,7 +45,11 @@ alpine-base/
 │   ├── build-podman.sh        # 构建 OCI 镜像
 │   ├── build-all.sh           # 一键构建两种镜像
 │   ├── generate-streams.py    # Incus 镜像 → simple-streams 树
+│   ├── package-runman-rootfs.sh # Alpine Incus rootfs → Runman tar.zst
+│   ├── generate-runman-feed.py # 生成 Runman Agent images.json 清单
+│   ├── build-runman-feed-local.sh # 从本地 amd64/arm64 构建输出生成 feed
 │   ├── validate-streams.py    # 校验清单、文件哈希与组合指纹
+│   ├── validate-runman-feed.py # 校验 Runman feed 清单与文件哈希
 │   ├── serve-incus.sh         # 一键生成 + Docker 启动镜像源
 │   ├── test-ssh.sh            # SSH 密码登录发布门禁
 │   └── release.sh             # 发布 stable
@@ -290,6 +294,12 @@ podman run -d --name alpine -p 2222:22 \
 > | `debian-13-arm64-incus.tar.xz` + `debian-13-arm64-rootfs.squashfs` | `continuous` / `v*` | Debian ARM64 `incus image import` |
 > | `incus-streams.tar.gz` | `continuous` / `v*` | 自建 simple-streams 镜像源 |
 
+`incus-streams.tar.gz` 同时保留 Incus 的 `streams/v1` 和 `images/`，并新增 `runman/`：
+`runman/images.json` 与 amd64/arm64 的 `rootfs-alpine-*.tar.zst`。Rust v2 可将
+`image_base_url` 配置为镜像站根目录下的 `/runman`；Go/Incus 继续使用根目录的
+`streams/v1`。Runman 产物在打包前检查 Alpine OpenSSH 版本、sshd/OpenRC 文件和 SSH 主机密钥，
+清单在两种架构的归档生成后才写出。
+
 ### Incus（从 Release 产物或 CI 产物导入）
 
 Incus 是 System Container，**不进 GHCR**（GHCR 只存 OCI 镜像）。两种方式获取：
@@ -332,10 +342,14 @@ release 在同一天更新时出现新清单与旧缓存文件的哈希错配。
   --image debian:13:arm64:output/incus/debian/arm64 \
   --output-dir incus-server/www
 python3 scripts/validate-streams.py incus-server/www
+# 可选：同一个站点同时提供 Rust v2 所需的 tar.zst feed
+bash scripts/build-runman-feed-local.sh output/incus incus-server/www/runman
+python3 scripts/validate-runman-feed.py incus-server/www/runman
 ```
 
 CI 在每次 `Build Incus Image` 时使用 x64/ARM64 原生 runner 分别构建，
-再合并到 Release 的 `incus-streams.tar.gz`。Incus 客户端会自动选择与宿主机匹配的架构。
+再合并到 Release 的 `incus-streams.tar.gz`。Incus 客户端会自动选择与宿主机匹配的架构；Rust v2
+从同一个包的 `/runman` feed 获取 Alpine tar.zst 镜像。
 下载解压到 `incus-server/www` 即可：
 
 ```bash

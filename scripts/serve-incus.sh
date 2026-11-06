@@ -59,6 +59,22 @@ esac
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: '$1' is required but not found."; exit 1; }; }
 
+prepare_local_runman_feed() {
+  if [ -s output/incus/alpine/amd64/rootfs.squashfs ] \
+      && [ -s output/incus/alpine/arm64/rootfs.squashfs ]; then
+    echo "[runman] generating the Alpine feed for Rust v2 from local Incus rootfs ..."
+    bash scripts/build-runman-feed-local.sh output/incus "$WWW_DIR/runman"
+  fi
+}
+
+validate_runman_feed_if_present() {
+  local root="$1"
+  if [ -f "$root/runman/images.json" ]; then
+    need python3
+    python3 scripts/validate-runman-feed.py "$root/runman"
+  fi
+}
+
 # --- Resolve docker compose (v2 plugin preferred, v1 fallback) ---
 if docker compose version >/dev/null 2>&1; then
   DC="docker compose"
@@ -89,6 +105,13 @@ ensure_streams() {
   # so the download/extract and local-generate steps can write into it.
   mkdir -p "$WWW_DIR"
   if [ "$FORCE_DOWNLOAD" = 0 ] && [ -f "$WWW_DIR/streams/v1/index.json" ]; then
+    validate_runman_feed_if_present "$WWW_DIR"
+    if [ ! -f "$WWW_DIR/runman/images.json" ]; then
+      prepare_local_runman_feed
+    fi
+    if [ ! -f "$WWW_DIR/runman/images.json" ]; then
+      echo "[runman] no Runman feed is present; Rust v2 cannot pull images from this tree yet."
+    fi
     echo "[streams] using existing tree at $WWW_DIR"
     return
   fi
@@ -111,6 +134,10 @@ ensure_streams() {
       echo "[streams] generating from local Incus outputs ..."
       need python3
       python3 scripts/generate-streams.py "$@"
+      prepare_local_runman_feed
+      if [ ! -f "$WWW_DIR/runman/images.json" ]; then
+        echo "[runman] no Runman feed was generated; both Alpine architectures are required for Rust v2."
+      fi
       return
     fi
   fi
@@ -141,9 +168,13 @@ ensure_streams() {
   mkdir -p "$TMP/tree"
   tar -xzf "$TMP/$ASSET" -C "$TMP/tree"
   python3 "$REPO_ROOT/scripts/validate-streams.py" "$TMP/tree"
+  validate_runman_feed_if_present "$TMP/tree"
   cp -a "$TMP/tree/." "$WWW_DIR/"
   rm -rf "$TMP"
   echo "[streams] validated and extracted to $WWW_DIR"
+  if [ ! -f "$WWW_DIR/runman/images.json" ]; then
+    echo "[runman] selected Release has no Runman feed; Rust v2 cannot pull images from this tree yet."
+  fi
 }
 
 ensure_streams
@@ -174,6 +205,10 @@ for i in $(seq 1 30); do
   sleep 1
 done
 [ "$OK" = 1 ] || { echo "ERROR: endpoint not reachable after 30s. Check 'docker logs'."; exit 1; }
+if [ -f "$WWW_DIR/runman/images.json" ]; then
+  curl -fsS "http://localhost:$PORT/runman/images.json" >/dev/null \
+    || { echo "ERROR: Runman image feed is not reachable."; exit 1; }
+fi
 
 # --- Detect a LAN address for the client command ---
 HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -186,6 +221,9 @@ echo ""
 echo "=== Incus image server is running ==="
 echo "  Local:  http://localhost:$PORT/streams/v1/index.json"
 echo "  LAN:    http://$HOST_IP:$PORT/streams/v1/index.json"
+if [ -f "$WWW_DIR/runman/images.json" ]; then
+  echo "  Runman: http://$HOST_IP:$PORT/runman/images.json"
+fi
 echo ""
 echo "On any Incus host, add this remote and launch:"
 echo "  incus remote add $REMOTE_NAME http://$HOST_IP:$PORT --protocol=simplestreams"

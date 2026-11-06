@@ -40,8 +40,8 @@ jobs:
           grep -q 'debian:13-slim' debian/Containerfile
       - name: Shell and Python syntax checks
         run: |
-          for f in common/setup-base.sh podman/entrypoint.sh scripts/*.sh; do sh -n "$f"; done
-          python3 -m py_compile scripts/generate-streams.py scripts/validate-streams.py
+          for f in common/setup-base.sh podman/entrypoint.sh scripts/*.sh; do bash -n "$f"; done
+          python3 -m py_compile scripts/generate-streams.py scripts/generate-runman-feed.py scripts/validate-runman-feed.py scripts/validate-streams.py
       - name: Validate combined Alpine and Debian simple-streams
         run: |
           for spec in alpine-amd64 alpine-arm64 debian-amd64 debian-arm64; do
@@ -165,7 +165,7 @@ jobs:
       - name: Install distrobuilder
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc debootstrap rsync gpg squashfs-tools make build-essential
+          sudo apt-get install -y gcc debootstrap rsync gpg squashfs-tools zstd make build-essential
           (cd distrobuilder-src && make)
           sudo install -m 0755 "$(go env GOPATH)/bin/distrobuilder" /usr/local/bin/distrobuilder
           distrobuilder --version
@@ -197,6 +197,19 @@ jobs:
           else
             test -x "$root/usr/sbin/sshd" && test -e "$root/lib/systemd/system/ssh.service"
           fi
+      - name: Package Runman Alpine rootfs
+        if: matrix.distro == 'alpine'
+        run: |
+          root="/tmp/${{ matrix.distro }}-${{ matrix.arch }}-incus-rootfs"
+          serial="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          sudo bash scripts/package-runman-rootfs.sh "$root" "${{ matrix.arch }}" "$serial" \
+            "$ALPINE_OPENSSH_FIXED_VERSION" output/runman
+      - uses: actions/upload-artifact@v7
+        if: matrix.distro == 'alpine'
+        with:
+          name: alpine-${{ matrix.version }}-${{ matrix.arch }}-runman
+          path: output/runman/rootfs-alpine-${{ matrix.arch }}-*.tar.zst
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}-incus
@@ -224,9 +237,15 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: debian-13-arm64-incus, path: output/incus/debian/arm64 }
       - uses: actions/download-artifact@v8
+        with: { name: alpine-3.24-amd64-runman, path: output/runman }
+      - uses: actions/download-artifact@v8
+        with: { name: alpine-3.24-arm64-runman, path: output/runman }
+      - uses: actions/download-artifact@v8
         with: { name: alpine-3.24-podman, path: output/podman }
       - uses: actions/download-artifact@v8
         with: { name: debian-13-podman, path: output/podman }
+      - name: Install Runman archive validator
+        run: sudo apt-get update && sudo apt-get install -y zstd
       - name: Build and validate combined simple-streams tree
         run: |
           python3 scripts/generate-streams.py --clean --output-dir incus-server/www \
@@ -236,6 +255,11 @@ jobs:
             --image debian:${DEBIAN_VERSION}:amd64:output/incus/debian/amd64 \
             --image debian:${DEBIAN_VERSION}:arm64:output/incus/debian/arm64
           python3 scripts/validate-streams.py incus-server/www
+          runman_serial="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          python3 scripts/generate-runman-feed.py \
+            --input-dir output/runman --output-dir incus-server/www/runman \
+            --version "$ALPINE_VERSION" --serial "$runman_serial"
+          python3 scripts/validate-runman-feed.py incus-server/www/runman
           tar -czf incus-streams.tar.gz -C incus-server/www .
           # Keep the original Alpine asset names for existing install.sh users.
           cp output/incus/alpine/amd64/incus.tar.xz incus.tar.xz
