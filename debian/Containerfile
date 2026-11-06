@@ -13,6 +13,8 @@ RUN apt-get update \
  && mkdir -p /run/sshd
 
 COPY common/sshd_config /etc/ssh/sshd_config
+# Debian's OpenSSH supports PAM; keep the explicit policy in this image only.
+RUN printf '\nUsePAM no\n' >> /etc/ssh/sshd_config
 COPY podman/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh \
  && rm -f /etc/ssh/ssh_host_*

@@ -7,7 +7,7 @@ PasswordAuthentication yes
 PubkeyAuthentication yes
 PermitEmptyPasswords no
 KbdInteractiveAuthentication no
-UsePAM no
+# UsePAM is configured per distro because Alpine's OpenSSH is built without PAM.
 UseDNS no
 X11Forwarding no
 ClientAliveInterval 60

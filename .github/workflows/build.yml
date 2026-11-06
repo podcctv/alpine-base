@@ -13,7 +13,6 @@ env:
   DEBIAN_VERSION: "13"
   ALPINE_OPENSSH_FIXED_VERSION: "10.3_p1-r2"
   DISTROBUILDER_COMMIT: "9c74504399cbd09514c62a49d43ff0cf72619ecf"
-  DISTROBUILDER_GO_VERSION: "1.25.12"
 
 jobs:
   validate:
@@ -30,6 +29,9 @@ jobs:
             grep -q '^ *PasswordAuthentication yes' "$f"
             grep -q '^ *PermitEmptyPasswords no' "$f"
           done
+          ! grep -q '^ *UsePAM ' common/sshd_config
+          grep -q 'UsePAM no' debian/Containerfile
+          ! grep -q '^ *UsePAM ' incus/image.yaml
           grep -q 'cloud-init' incus/image.yaml
           grep -q 'htop' incus/image.yaml
           grep -q 'ncurses-terminfo-base' incus/image.yaml
@@ -153,7 +155,7 @@ jobs:
       - name: Set up Go for distrobuilder
         uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.DISTROBUILDER_GO_VERSION }}
+          go-version-file: distrobuilder-src/go.mod
           cache: false
       - name: Install distrobuilder
         run: |

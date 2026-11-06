@@ -49,7 +49,6 @@ files:
       PubkeyAuthentication yes
       PermitEmptyPasswords no
       KbdInteractiveAuthentication no
-      UsePAM no
       UseDNS no
       X11Forwarding no
       ClientAliveInterval 60
