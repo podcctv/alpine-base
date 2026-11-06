@@ -302,7 +302,7 @@ podman run -d --name alpine -p 2222:22 \
 清单在两种架构的归档生成后才写出。
 Release 也单独发布较小的 `runman-feed.tar.gz`，生产镜像机可运行
 `sudo bash ./scripts/update-runman-feed.sh` 只更新 `/runman`，验证公网清单后保留旧 feed 目录供回滚，
-不必重新暂存完整的 Incus 镜像树。
+不必重新暂存完整的 Incus 镜像树；下载前会要求 `/tmp` 与镜像树所在分区各至少有 200 MiB 可用空间。
 
 ### Incus（从 Release 产物或 CI 产物导入）
 

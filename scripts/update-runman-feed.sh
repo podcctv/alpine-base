@@ -16,7 +16,7 @@ PUBLIC_URL="$PUBLIC_BASE/images.json"
     echo "image web root is missing: $WWW_DIR" >&2
     exit 1
 }
-for command_name in curl tar python3 grep; do
+for command_name in curl tar python3 grep awk df; do
     command -v "$command_name" >/dev/null 2>&1 || {
         echo "'$command_name' is required" >&2
         exit 1
@@ -52,6 +52,18 @@ on_signal() {
 trap cleanup EXIT
 trap 'rollback' ERR
 trap 'on_signal' HUP INT TERM
+
+for path in "$WWW_DIR" "$WORK"; do
+    available_mib=$(df -Pm "$path" | awk 'NR == 2 {print $4}')
+    [[ "$available_mib" =~ ^[0-9]+$ ]] || {
+        echo "cannot determine free space for $path" >&2
+        exit 1
+    }
+    [ "$available_mib" -ge 200 ] || {
+        echo "only $available_mib MiB is free on the filesystem containing $path; need at least 200 MiB" >&2
+        exit 1
+    }
+done
 
 ARCHIVE="$WORK/runman-feed.tar.gz"
 curl -fSL --retry 3 --connect-timeout 20 --max-time 300 \
