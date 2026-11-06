@@ -11,6 +11,9 @@ on:
 env:
   ALPINE_VERSION: "3.24"
   DEBIAN_VERSION: "13"
+  ALPINE_OPENSSH_FIXED_VERSION: "10.3_p1-r2"
+  DISTROBUILDER_COMMIT: "9c74504399cbd09514c62a49d43ff0cf72619ecf"
+  DISTROBUILDER_GO_VERSION: "1.25.12"
 
 jobs:
   validate:
@@ -93,6 +96,10 @@ jobs:
           podman exec image-ci-test sh -c 'ss -lntp | grep :22 || netstat -tlnp | grep :22'
           podman exec image-ci-test sshd -T | grep '^permitrootlogin yes'
           podman exec image-ci-test sshd -T | grep '^passwordauthentication yes'
+          if [ "${{ matrix.distro }}" = alpine ]; then
+            installed="$(podman exec image-ci-test apk info -v openssh-server)"
+            test "$installed" = "openssh-server-${ALPINE_OPENSSH_FIXED_VERSION}"
+          fi
       - name: Push to GHCR
         if: github.event_name != 'pull_request'
         run: |
@@ -136,11 +143,25 @@ jobs:
           - { distro: debian, version: "13", arch: arm64, metadata_arch: aarch64, elf_pattern: "ARM aarch64", runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v7
+      - name: Check out pinned distrobuilder source
+        uses: actions/checkout@v7
+        with:
+          repository: lxc/distrobuilder
+          ref: ${{ env.DISTROBUILDER_COMMIT }}
+          path: distrobuilder-src
+          persist-credentials: false
+      - name: Set up Go for distrobuilder
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.DISTROBUILDER_GO_VERSION }}
+          cache: false
       - name: Install distrobuilder
         run: |
           sudo apt-get update
-          sudo apt-get install -y snapd debootstrap
-          sudo snap install distrobuilder --classic
+          sudo apt-get install -y gcc debootstrap rsync gpg squashfs-tools make build-essential
+          (cd distrobuilder-src && make)
+          sudo install -m 0755 "$(go env GOPATH)/bin/distrobuilder" /usr/local/bin/distrobuilder
+          distrobuilder --version
       - name: Build Incus image
         run: sudo ./scripts/build-incus.sh "${{ matrix.distro }}" "${{ matrix.arch }}"
       - name: Verify Incus rootfs image contract
@@ -160,6 +181,12 @@ jobs:
             test -x "$root/usr/bin/htop"
             test -f "$root/etc/profile.d/20-terminal-fallback.sh"
             grep -q 'TERM=xterm-256color' "$root/etc/profile.d/20-terminal-fallback.sh"
+            openssh_version="$(awk '
+              /^P:openssh-server$/ { wanted=1; next }
+              wanted && /^V:/ { sub(/^V:/, ""); print; exit }
+              wanted && /^[A-Z]:/ { wanted=0 }
+            ' "$root/lib/apk/db/installed")"
+            test "$openssh_version" = "$ALPINE_OPENSSH_FIXED_VERSION"
           else
             test -x "$root/usr/sbin/sshd" && test -e "$root/lib/systemd/system/ssh.service"
           fi
