@@ -48,6 +48,7 @@ alpine-base/
 │   ├── package-runman-rootfs.sh # Alpine Incus rootfs → Runman tar.zst
 │   ├── generate-runman-feed.py # 生成 Runman Agent images.json 清单
 │   ├── build-runman-feed-local.sh # 从本地 amd64/arm64 构建输出生成 feed
+│   ├── update-runman-feed.sh # 只更新生产环境 Runman feed，保留回滚副本
 │   ├── validate-streams.py    # 校验清单、文件哈希与组合指纹
 │   ├── validate-runman-feed.py # 校验 Runman feed 清单与文件哈希
 │   ├── serve-incus.sh         # 一键生成 + Docker 启动镜像源
@@ -299,6 +300,9 @@ podman run -d --name alpine -p 2222:22 \
 `image_base_url` 配置为镜像站根目录下的 `/runman`；Go/Incus 继续使用根目录的
 `streams/v1`。Runman 产物在打包前检查 Alpine OpenSSH 版本、sshd/OpenRC 文件和 SSH 主机密钥，
 清单在两种架构的归档生成后才写出。
+Release 也单独发布较小的 `runman-feed.tar.gz`，生产镜像机可运行
+`sudo bash ./scripts/update-runman-feed.sh` 只更新 `/runman`，验证公网清单后保留旧 feed 目录供回滚，
+不必重新暂存完整的 Incus 镜像树。
 
 ### Incus（从 Release 产物或 CI 产物导入）
 

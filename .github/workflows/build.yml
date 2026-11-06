@@ -260,6 +260,7 @@ jobs:
             --input-dir output/runman --output-dir incus-server/www/runman \
             --version "$ALPINE_VERSION" --serial "$runman_serial"
           python3 scripts/validate-runman-feed.py incus-server/www/runman
+          tar -czf runman-feed.tar.gz -C incus-server/www/runman .
           tar -czf incus-streams.tar.gz -C incus-server/www .
           # Keep the original Alpine asset names for existing install.sh users.
           cp output/incus/alpine/amd64/incus.tar.xz incus.tar.xz
@@ -280,6 +281,7 @@ jobs:
             debian-13-incus.tar.xz debian-13-rootfs.squashfs
             debian-13-arm64-incus.tar.xz debian-13-arm64-rootfs.squashfs
             incus-streams.tar.gz
+            runman-feed.tar.gz
             output/podman/alpine-base-${ALPINE_VERSION}-podman.tar
             output/podman/debian-base-${DEBIAN_VERSION}-podman.tar
           )
